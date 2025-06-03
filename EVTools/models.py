@@ -3,6 +3,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 PERCENTAGE_VALIDATOR = [MinValueValidator(0), MaxValueValidator(100)]
 
+
 class LoadCategoryModel(models.Model):
     CATEGORY_CHOICES = (("commercial", 'commercial'), ("agricultural", 'agricultural'), ("industrial",
                         'industrial'), ("residential", 'residential'), ("public", 'public'), ("others", 'others'),)
@@ -12,6 +13,10 @@ class LoadCategoryModel(models.Model):
         default="", blank=True, null=True, max_length=400)
     salesCAGR = models.IntegerField(blank=True, null=True, default=0)
     specifySplit = models.FloatField(null=True, blank=True, default=0)
+
+    # def __str__(self):
+    #     return self.id
+
 
 class vehicleCategoryModel(models.Model):
     VEHICLE_CATEGORY_CHOICES = (("car", 'car'), ("bus", 'bus'), (
@@ -35,6 +40,22 @@ class vehicleCategoryModel(models.Model):
     CAGR_V = models.IntegerField(default=0, blank=True, null=True)
     baseElectricityTariff = models.FloatField(
         default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
+
+    # n=int(input("Enter the number of vehicles of a single category")) #1000                 #Number of vehicles of a single category
+    # f=int(input("Enter the frequency of charging each vehicle per day")) #1
+    # c=int(input("Enter the battery capacity of the chosen category of vehicle in kwh")) #38
+    # p=int(input("Enter the charging power required for the chosen category of vehicle in kw")) #10
+    # e=int(input("Enter the charging efficiency % \nFor 20 percent, enter 20 without the percentage sign")) #95
+    # r=int(input("Enter the chosen vehicle range in kilometers")) #300
+    # k=int(input("Enter the average/ mean of charging start time in minutes. Consider a 24 hour clock. For example 6 Pm would be 1080 minutes - 18 hours x 60 minutes"))#1200
+    # l=int(input("Enter the standard deviation of k in minutes")) #120
+    # g=int(input("Enter the average daily trip length in kilometers")) #10
+    # h=int(input("Enter the standard deviation of g in kilometers")) #3
+    #s=int(input("Enter the average/mean of possible Ending State Of Charges of the vehicle batteries.For 20 percent, enter 20 without any percentage sign"))
+    # u=int(input("Enter the standard deviation of s. For 20 percent, enter 20 without any percentage sign"))#2
+    # rowlimit_xl=2000000     #0.25 lakh rows per excel sheet are permitted - actual limit is 1,048,576
+    # CAGR_V=int(input("Enter the CAGR of sales for chosen vehicle category. For 20 percent, enter 20 without any percentage sign")) #5
+
 
 class evAnalysis(models.Model):
     loadCategory = models.IntegerField(
@@ -102,6 +123,9 @@ class evAnalysis(models.Model):
     date2_end = models.CharField(
         default="", blank=False, null=False, max_length=10)
 
+    # s = summer
+    # w = winter
+
     s_pks = models.CharField(
         default="", blank=False, null=False, max_length=10)
     s_pke = models.CharField(
@@ -139,9 +163,13 @@ class evAnalysis(models.Model):
 
 class Files(models.Model):
     file = models.FileField(upload_to="FileUpload/", blank=False, null=False)
+
     def delete(self, *args, **kwargs):
+        # You have to prepare what you need before delete the model
         storage, path = self.file.storage, self.file.path
+        # Delete the model before the file
         super(Files, self).delete(*args, **kwargs)
+        # Delete the file after the model
         storage.delete(path)
 
 
