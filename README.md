@@ -28,6 +28,8 @@ pip install django-rest-knox
 pip install seaborn
 pip install altair
 pip install scipy
+pip install xlrd>=2.0.1
+pip install openpyxl
 
 These packages are used for admin UI, APIs, CORS handling, authentication, and data visualization.
 
