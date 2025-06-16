@@ -193,6 +193,8 @@ class FileUpload(APIView):
             return Response(file_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # EV Analysis with automatic cleanup
+
+
 class EvAnalysisView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -204,6 +206,8 @@ class EvAnalysisView(APIView):
             start_time = time.time()
             all_data = request.data.copy()
             files = request.FILES
+            # Ensure the root media folder exists
+            os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
             # Save uploaded file
             if 'isLoadSplitFile' in all_data and isinstance(all_data['isLoadSplitFile'], str):
@@ -217,7 +221,8 @@ class EvAnalysisView(APIView):
             elif 'isLoadSplitFile' in files:
                 fs = FileSystemStorage()
                 file = files['isLoadSplitFile']
-                upload_folder = 'media'
+                upload_folder = 'media/FileUpload'
+                # Create the upload folder under media
                 os.makedirs(os.path.join(
                     fs.location, upload_folder), exist_ok=True)
                 filename = fs.save(f"media/FileUpload/{file.name}", file)
@@ -402,9 +407,10 @@ class EvAnalysisView(APIView):
 
     def run_full_analysis(self, input_data, folder_id):
         """Run the complete analysis pipeline with fixed resolution handling"""
+        os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
         # Create output directory
-        output_dir = f'media/outputs/{folder_id}'
+        output_dir = os.path.join(settings.MEDIA_ROOT, 'outputs', folder_id)
         os.makedirs(output_dir, exist_ok=True)
 
         # Step 1: Load forecast for each vehicle category
@@ -490,12 +496,12 @@ class EvAnalysisView(APIView):
 
         Source = excelimport.iloc[4:, :]
         Source.columns = ['Meter.No', 'datetime_utc', 'Active_B_PH', 'Active_Y_PH',
-                        'Active_R_PH', 'Reactive_B_PH', 'Reactive_Y_PH', 'Reactive_R_PH', 'VBV', 'VYV', 'VRV']
+                          'Active_R_PH', 'Reactive_B_PH', 'Reactive_Y_PH', 'Reactive_R_PH', 'VBV', 'VYV', 'VRV']
         Source = Source.reset_index(drop=True)
 
         Source[''] = (((Source.Active_B_PH * Source.VBV) +
-                    (Source.Active_Y_PH * Source.VYV) +
-                    (Source.Active_R_PH * Source.VRV))/1000)
+                       (Source.Active_Y_PH * Source.VYV) +
+                       (Source.Active_R_PH * Source.VRV))/1000)
         Source['datetime_utc'] = pd.to_datetime(Source['datetime_utc'])
         Source['date'] = Source['datetime_utc'].dt.date
 
@@ -513,7 +519,7 @@ class EvAnalysisView(APIView):
 
         Source.set_index('datetime_utc', inplace=True)
         Calculated_load = Source.drop(['Meter.No', 'Active_B_PH', 'Active_Y_PH', 'Active_R_PH',
-                                    'Reactive_B_PH', 'Reactive_Y_PH', 'Reactive_R_PH', 'VBV', 'VYV', 'VRV'], axis=1)
+                                       'Reactive_B_PH', 'Reactive_Y_PH', 'Reactive_R_PH', 'VBV', 'VYV', 'VRV'], axis=1)
         Calculated_load.index.name = None
         abc = pd.DataFrame(Calculated_load[''].astype(float).values)
 
@@ -564,7 +570,8 @@ class EvAnalysisView(APIView):
                     labels) else labels
                 labels = np.concatenate(
                     [labels, labels_to_repeat[:additional_needed]])
-                print(f"Extended labels to {len(labels)} to match data columns")
+                print(
+                    f"Extended labels to {len(labels)} to match data columns")
 
         final_load = load_extract.copy()
         final_load.columns = labels
