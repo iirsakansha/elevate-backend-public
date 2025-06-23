@@ -47,6 +47,9 @@ from matplotlib.collections import LineCollection
 from matplotlib import colors as mcolors, use
 import matplotlib
 import traceback
+from django.db import transaction
+
+logger = logging.getLogger(__name__)
 matplotlib.use('Agg')
 sns.set()
 
@@ -203,9 +206,11 @@ class EvAnalysisView(APIView):
     def post(self, request, *args, **kwargs):
         created_load_categories = []
         created_vehicle_categories = []
+        file_path = None  # Track file path for cleanup
 
         try:
             start_time = time.time()
+            logger.info(f"Starting EV analysis at {start_time}")
             all_data = request.data.copy()
             files = request.FILES
 
@@ -221,6 +226,8 @@ class EvAnalysisView(APIView):
             elif 'isLoadSplitFile' in files:
                 fs = FileSystemStorage()
                 file = files['isLoadSplitFile']
+                if not file.name.endswith('.xlsx'):
+                    return Response({'error': 'Only Excel files are supported'}, status=400)
                 upload_folder = 'media/FileUpload'
                 os.makedirs(os.path.join(
                     fs.location, upload_folder), exist_ok=True)
@@ -254,13 +261,13 @@ class EvAnalysisView(APIView):
 
             # Clean up temporary data
             self.cleanup_temporary_data(
-                created_load_categories, created_vehicle_categories)
+                created_load_categories, created_vehicle_categories, ev_instance, file_path)
 
             return Response(results, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             self.cleanup_temporary_data(
-                created_load_categories, created_vehicle_categories)
+                created_load_categories, created_vehicle_categories, ev_instance, file_path)
             return Response(
                 {'error': str(e), 'traceback': traceback.format_exc()},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -273,44 +280,78 @@ class EvAnalysisView(APIView):
         created_vehicle_categories = []
 
         load_categories = all_data.get('categoryData', [])
+        if len(load_categories) > 6:
+            raise ValueError("Maximum 6 load categories allowed")
         for idx, category_data in enumerate(load_categories[:6], start=1):
-            category = LoadCategoryModel.objects.create(**category_data)
-            created_load_categories.append(category)
-            processed_data[f'loadCategory{idx}'] = category.id
+            try:
+                category = LoadCategoryModel.objects.create(**category_data)
+                created_load_categories.append(category)
+                processed_data[f'loadCategory{idx}'] = category.id
+            except Exception as e:
+                raise ValueError(f"Invalid category data: {str(e)}")
 
         vehicle_categories = all_data.get('vehicleCategoryData', [])
+        if len(vehicle_categories) > 5:
+            raise ValueError("Maximum 5 vehicle categories allowed")
         for idx, vehicle_data in enumerate(vehicle_categories[:5], start=1):
-            vehicle = vehicleCategoryModel.objects.create(**vehicle_data)
-            created_vehicle_categories.append(vehicle)
-            processed_data[f'vehicleCategoryData{idx}'] = vehicle.id
+            try:
+                vehicle = vehicleCategoryModel.objects.create(**vehicle_data)
+                created_vehicle_categories.append(vehicle)
+                processed_data[f'vehicleCategoryData{idx}'] = vehicle.id
+            except Exception as e:
+                raise ValueError(f"Invalid vehicle category data: {str(e)}")
 
         processed_data['loadCategory'] = len(load_categories)
         processed_data['numOfvehicleCategory'] = len(vehicle_categories)
 
         return processed_data, created_load_categories, created_vehicle_categories
 
-    def cleanup_temporary_data(self, created_load_categories, created_vehicle_categories):
-        """Delete all temporary category data created during processing"""
-        try:
-            for category in created_load_categories:
-                try:
-                    category.delete()
-                except Exception as e:
-                    print(f"Error deleting load category {category.id}: {e}")
-            for vehicle in created_vehicle_categories:
-                try:
-                    vehicle.delete()
-                except Exception as e:
-                    print(f"Error deleting vehicle category {vehicle.id}: {e}")
-            print(
-                f"Cleaned up {len(created_load_categories)} load categories and {len(created_vehicle_categories)} vehicle categories")
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
+    def cleanup_temporary_data(self, created_load_categories, created_vehicle_categories, ev_instance=None, file_path=None):
+        """Delete all temporary category data, EV analysis instance, and uploaded file created during processing"""
+        with transaction.atomic():
+            # Delete load categories
+            try:
+                if created_load_categories:
+                    LoadCategoryModel.objects.filter(
+                        id__in=[cat.id for cat in created_load_categories]).delete()
+                    logger.info(
+                        f"Deleted {len(created_load_categories)} load categories")
+            except Exception as e:
+                logger.error(f"Error deleting load categories: {e}")
+
+            # Delete vehicle categories
+            try:
+                if created_vehicle_categories:
+                    vehicleCategoryModel.objects.filter(
+                        id__in=[veh.id for veh in created_vehicle_categories]).delete()
+                    logger.info(
+                        f"Deleted {len(created_vehicle_categories)} vehicle categories")
+            except Exception as e:
+                logger.error(f"Error deleting vehicle categories: {e}")
+
+            # Delete EV analysis instance
+            try:
+                if ev_instance:
+                    ev_instance.delete()
+                    logger.info(
+                        f"Deleted EV analysis instance {ev_instance.id}")
+            except Exception as e:
+                logger.error(f"Error deleting EV analysis instance: {e}")
+
+            # Delete uploaded file
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Deleted temporary file: {file_path}")
+            except Exception as e:
+                logger.error(f"Error deleting file {file_path}: {e}")
 
     def prepare_analysis_data(self, ev_instance):
         """Prepare data dictionary for analysis"""
         load_categories = []
         for i in range(1, ev_instance.loadCategory + 1):
+            if not hasattr(ev_instance, f'loadCategory{i}_id'):
+                raise ValueError(f"Missing loadCategory{i}_id in ev_instance")
             cat_id = getattr(ev_instance, f'loadCategory{i}_id')
             cat = LoadCategoryModel.objects.get(id=cat_id)
             load_categories.append({
@@ -394,8 +435,9 @@ class EvAnalysisView(APIView):
 
     def run_full_analysis(self, input_data, folder_id):
         """Run the complete analysis pipeline and return raw data"""
-        # Step 1: Load forecast for each vehicle category
         def load_forecast(n, f, c, p, e, r, k, l, g, h, s, u, rowlimit_xl, CAGR_V, tariff):
+            if input_data['resolution'] <= 0:
+                raise ValueError("Resolution must be positive")
             Total_Charges = n * f
             Blocks = np.arange(1, int(
                 1440/input_data['resolution'])+1, 1).reshape((1, int(1440/input_data['resolution'])))
@@ -457,7 +499,13 @@ class EvAnalysisView(APIView):
             new_dict[2][cat] = category['salesCAGR']
 
         # Process load data from file
-        excelimport = pd.read_excel(input_data['isLoadSplitFile'], header=None)
+        try:
+            excelimport = pd.read_excel(
+                input_data['isLoadSplitFile'], header=None)
+            if excelimport.shape[0] < 5:
+                raise ValueError("Excel file must have at least 5 rows")
+        except Exception as e:
+            raise ValueError(f"Failed to read Excel file: {str(e)}")
         Source = excelimport.iloc[4:, :]
         Source.columns = ['Meter.No', 'datetime_utc', 'Active_B_PH', 'Active_Y_PH',
                           'Active_R_PH', 'Reactive_B_PH', 'Reactive_Y_PH', 'Reactive_R_PH', 'VBV', 'VYV', 'VRV']
@@ -493,8 +541,8 @@ class EvAnalysisView(APIView):
 
         if total_data_points % time_blocks_per_day != 0:
             abc_trimmed = abc.iloc[:complete_days * time_blocks_per_day]
-            print(
-                f"Warning: Data trimmed from {total_data_points} to {len(abc_trimmed)} points to fit {complete_days} complete days")
+            logger.warning(
+                f"Data trimmed from {total_data_points} to {len(abc_trimmed)} points to fit {complete_days} complete days")
         else:
             abc_trimmed = abc
 
@@ -503,20 +551,21 @@ class EvAnalysisView(APIView):
                 abc_trimmed.to_numpy(), (complete_days, time_blocks_per_day)))
             load_extract = load_extract.T
         except ValueError as e:
-            print(f"Reshape error: {e}")
+            logger.error(f"Reshape error: {e}")
             raise
 
         if len(labels) != load_extract.shape[1]:
             if len(labels) > load_extract.shape[1]:
                 labels = labels[:load_extract.shape[1]]
-                print(f"Trimmed labels to {len(labels)} to match data columns")
+                logger.warning(
+                    f"Trimmed labels to {len(labels)} to match data columns")
             else:
                 additional_needed = load_extract.shape[1] - len(labels)
                 labels_to_repeat = labels[-additional_needed:] if additional_needed <= len(
                     labels) else labels
                 labels = np.concatenate(
                     [labels, labels_to_repeat[:additional_needed]])
-                print(
+                logger.warning(
                     f"Extended labels to {len(labels)} to match data columns")
 
         final_load = load_extract.copy()
@@ -528,10 +577,11 @@ class EvAnalysisView(APIView):
         selected_ranges = [selected_range]
 
         for year in range(1, 5):
-            next_range = (selected_ranges[-1]/100) * (
-                new_dict[1]['com']*(1+(new_dict[2]['com']/100)) +
-                new_dict[1]['res']*(1+(new_dict[2]['res']/100))
-            )
+            growth_factors = {
+                cat: new_dict[1][cat] * (1 + new_dict[2][cat] / 100) for cat in new_dict[1]
+            }
+            next_range = (selected_ranges[-1]/100) * \
+                sum(growth_factors.values())
             selected_ranges.append(next_range)
 
         selected_range_2, selected_range_3, selected_range_4, selected_range_5 = selected_ranges[
@@ -599,6 +649,8 @@ class EvAnalysisView(APIView):
 
     def generate_tod_ev_load_plot(self, final_res_res, excelimport, resolution):
         """Generate raw data for ToD EV load plot"""
+        if final_res_res.empty:
+            raise ValueError("Input data for ToD plot is empty")
         final_res_res_1 = final_res_res.to_numpy()
         mean_vals = final_res_res_1.mean(axis=0).tolist()
         std_vals = final_res_res_1.std(axis=0).tolist()
@@ -616,11 +668,13 @@ class EvAnalysisView(APIView):
                              excelimport, new_dict, slots):
         """Generate raw data for all outputs"""
         output_data = {}
+        try:
+            output_data['Simulated_EV_Load'] = ddf.values.tolist()
+        except Exception as e:
+            logger.error(f"Failed to process Simulated_EV_Load: {e}")
+            raise
 
-        # 1. Simulated EV Load data
-        output_data['Simulated_EV_Load'] = ddf.values.tolist()
-
-        # 2. EV load data for each year
+        # EV load data for each year
         ddf_years = [ddf]
         shazam_years = [shazam]
         growth_factors = [(input_data['vehicleCategoryData'][i]['CAGR_V']) /
@@ -635,10 +689,9 @@ class EvAnalysisView(APIView):
             ev_loads.append({
                 f'Year {year}': ddf_next.sum(axis=0).to_numpy().flatten().tolist()
             })
-
         output_data['EV_Load'] = ev_loads
 
-        # 3. Base Load data
+        # Base Load data
         start_date = "2019-05-01"
         end_date = "2020-07-30"
         dates = pd.date_range(start=start_date, end=end_date)
@@ -663,7 +716,7 @@ class EvAnalysisView(APIView):
             pivot_df[date.date()] = np.round(daily_load.astype(float), 6)
         output_data['DT_Base_Load'] = pivot_df.values.tolist()
 
-        # 4. Base load charts data
+        # Base load charts data
         selected_ranges = [selected_range, selected_range_2,
                            selected_range_3, selected_range_4, selected_range_5]
         base_loads = []
@@ -679,7 +732,7 @@ class EvAnalysisView(APIView):
             })
         output_data['Base_Load'] = base_loads
 
-        # 5. Combined load (Base + EV)
+        # Combined load (Base + EV)
         required_net_loads = [pd.DataFrame(
             selected_ranges[year]) + shazam_years[year].values for year in range(years)]
         combined_loads = []
@@ -695,13 +748,13 @@ class EvAnalysisView(APIView):
             })
         output_data['Base_EV_Load'] = combined_loads
 
-        # 6. Base + ToD EV load
+        # Base + ToD EV load
         final_res_res = pd.DataFrame(np.random.rand(
             5, int(1440/input_data['resolution'])))
         output_data['Base_ToD_EV_Load'] = self.generate_tod_ev_load_plot(
             final_res_res, excelimport, input_data['resolution'])
 
-        # 7. Summary table
+        # Summary table
         overshots = [rn - (excelimport.iloc[0, 1] * (input_data['BR_F'])/100)
                      for rn in required_net_loads]
         overshots_r = [rn - (excelimport.iloc[0, 1] * (90)/100)
@@ -717,7 +770,7 @@ class EvAnalysisView(APIView):
             })
         output_data['Summary_Table'] = table_data
 
-        # 8. Overshot data
+        # Overshot data
         overshot_data = []
         for year in range(1, 6):
             ov = overshots[year-1]
@@ -740,7 +793,7 @@ class EvAnalysisView(APIView):
             })
         output_data['Overshot'] = overshot_data
 
-        # 9. ToD analysis
+        # ToD analysis
         abc_ddf = pd.DataFrame({'seasons': np.random.choice(
             ['summer', 'winter'], 5), 'unit_type': np.random.choice(['pk', 'op', '0'], 5)})
         conditions_4 = [
@@ -783,7 +836,7 @@ class EvAnalysisView(APIView):
         output_data['Load_Simulation_ToD_Calculation'] = abc_ddf.to_dict(
             'records')
 
-        # 10. ToD surcharge/rebate
+        # ToD surcharge/rebate
         def calc_TOD_x(year_num):
             s_pk_sum = abc_ddf.loc[(abc_ddf['seasons'] == 'summer') & (
                 abc_ddf['unit_type'] == 'pk'), f'{year_num}_old_cost'].sum()
@@ -797,9 +850,14 @@ class EvAnalysisView(APIView):
                 abc_ddf['unit_type'] == '0'), f'{year_num}_old_cost'].sum()
             w_0_sum = abc_ddf.loc[(abc_ddf['seasons'] == 'winter') & (
                 abc_ddf['unit_type'] == '0'), f'{year_num}_old_cost'].sum()
-            numerator = (((60/input_data['resolution']) * (abc_ddf[f'{year_num}_old_tariff'].sum() +
-                                                           (abc_ddf[f'{year_num}_new_cost'].sum() - abc_ddf[f'{year_num}_old_cost'].sum()) *
-                                                           (input_data['sharedSavaing']/100))) / retail_tariff_df.iloc[0, 0])
+            old_tariff_sum = abc_ddf[f'{year_num}_old_tariff'].sum()
+            cost_diff = abc_ddf[f'{year_num}_new_cost'].sum(
+            ) - abc_ddf[f'{year_num}_old_cost'].sum()
+            shared_saving = input_data['sharedSavaing'] / 100
+            if retail_tariff_df.iloc[0, 0] == 0:
+                raise ValueError("Retail tariff cannot be zero")
+            numerator = (60 / input_data['resolution'] * (old_tariff_sum +
+                         cost_diff) * shared_saving) / retail_tariff_df.iloc[0, 0]
             denominator = (s_pk_sum + w_pk_sum - s_op_sum - w_op_sum)
             return 100 * (numerator - (s_pk_sum + w_pk_sum + s_op_sum + w_op_sum + s_0_sum + w_0_sum)) / denominator
 
