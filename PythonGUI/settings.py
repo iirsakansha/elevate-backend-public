@@ -28,11 +28,6 @@ SECRET_KEY = 'mon+-xmq(&ax-eukkwf%j%(z5&^mn+g2wp(0hgz7ely$ib5y&k'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 CORS_ORIGIN_ALLOW_ALL = True
-#CORS_ALLOWED_ORIGINS = ['http://*']
-# [    "http://localhost:8000",
-#     "http://localhost:3000",
-#
-# ]
 
 
 CORS_ALLOW_METHODS = [
@@ -71,6 +66,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'knox',     
+    'admin_panel.apps.AdminPanelConfig',
 ]
 
 MIDDLEWARE = [
@@ -179,4 +175,40 @@ REST_FRAMEWORK = {
 }
 REST_KNOX = {
     'TOKEN_TTL': timedelta(hours=12),  # default time 10h now 2h
+}
+
+
+CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'neelam@byniel.com'
+EMAIL_HOST_PASSWORD = 'duknfkdofwuobztp'
+DEFAULT_FROM_EMAIL = 'neelam@byniel.com'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        '': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+    },
 }
