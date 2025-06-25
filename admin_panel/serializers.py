@@ -4,42 +4,18 @@ from .models import UserProfile
 
 
 class SetPasswordSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=False)  # Added for password reset
-    old_password = serializers.CharField(
-        write_only=True, required=False)  # Optional for reset
-    new_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(min_length=6, write_only=True)
 
-    def validate(self, data):
-        user = self.context['request'].user if self.context.get(
-            'request') else None
-        email = data.get('email')
-        old_password = data.get('old_password')
-        new_password = data.get('new_password')
 
-        # For password reset (no user authentication, email provided)
-        if email and not user:
-            if not new_password:
-                raise serializers.ValidationError(
-                    {"new_password": "New password is required"})
-            if len(new_password) < 8:
-                raise serializers.ValidationError(
-                    {"new_password": "Password must be at least 8 characters long"})
-            return data
+class PasswordResetSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    new_password = serializers.CharField(min_length=6, write_only=True)
+   
 
-        # For password change (authenticated user, old_password required)
-        if not user or not user.is_authenticated:
-            raise serializers.ValidationError(
-                "User must be authenticated for password change")
-        if not old_password:
-            raise serializers.ValidationError(
-                {"old_password": "Old password is required"})
-        if not user.check_password(old_password):
-            raise serializers.ValidationError(
-                {"old_password": "Incorrect old password"})
-        if len(new_password) < 8:
-            raise serializers.ValidationError(
-                {"new_password": "Password must be at least 8 characters long"})
-        return data
+class PasswordResetNoEmailSerializer(serializers.Serializer):
+    new_password = serializers.CharField(min_length=6)
+    uidb64 = serializers.CharField()
+    token = serializers.CharField()
 
 class InvitedUserProfileSerializer(serializers.ModelSerializer):
     organization = serializers.CharField(

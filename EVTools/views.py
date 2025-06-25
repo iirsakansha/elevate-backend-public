@@ -84,6 +84,12 @@ class LoginAPI(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data
+
+        # Update invitation status if it's pending
+        if hasattr(user, 'profile') and user.profile.invitation_status == 'Pending':
+            user.profile.invitation_status = 'Accepted'
+            user.profile.save()
+
         return Response({
             "user": UserSerializer(user, context=self.get_serializer_context()).data,
             "token": AuthToken.objects.create(user)[1]

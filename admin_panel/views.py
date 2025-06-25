@@ -19,12 +19,14 @@ from knox.models import AuthToken
 from EVTools.serializers import LoginUserSerializer
 from EVTools.serializers import UserSerializer
 from .models import UserProfile
-from .serializers import SetPasswordSerializer, InvitedUserProfileSerializer
+from .serializers import PasswordResetNoEmailSerializer, SetPasswordSerializer, InvitedUserProfileSerializer
 from .utils import account_activation_token
 from urllib.parse import quote
 import logging
 from datetime import datetime
 from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth.tokens import default_token_generator
+
 logger = logging.getLogger(__name__)
 
 
@@ -241,34 +243,43 @@ def password_reset_confirm(request, uidb64, token):
 
 class PasswordResetAPI(APIView):
     def post(self, request):
-        serializer = SetPasswordSerializer(data=request.data)
+        serializer = PasswordResetNoEmailSerializer(data=request.data)
         if serializer.is_valid():
-            email = serializer.validated_data['email']
             new_password = serializer.validated_data['new_password']
-            uidb64 = request.data.get('uidb64')
-            token = request.data.get('token')
+            uidb64 = serializer.validated_data['uidb64']
+            token = serializer.validated_data['token']
 
             try:
-                user = User.objects.get(email=email)
-                try:
-                    uid = force_str(urlsafe_base64_decode(uidb64))
-                    if user.pk != int(uid) or not account_activation_token.check_token(user, token):
-                        return Response(
-                            {"error": "Invalid or expired reset token"},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                except (TypeError, ValueError, OverflowError):
-                    return Response(
-                        {"error": "Invalid reset token"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
+                uid = force_str(urlsafe_base64_decode(uidb64))
+                user = User.objects.get(pk=uid)
+                if not account_activation_token.check_token(user, token):
+                    return Response({"error": "Invalid or expired reset token"}, status=400)
                 user.set_password(new_password)
                 user.save()
-                return Response({"message": "Password reset successfully"}, status=status.HTTP_200_OK)
+                return Response({"message": "Password reset successfully"}, status=200)
             except User.DoesNotExist:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "User not found"}, status=404)
+        return Response(serializer.errors, status=400)
+
+class PasswordResetLinkValidateAPI(APIView):
+    def get(self, request):
+        uidb64 = request.query_params.get('uidb64')
+        token = request.query_params.get('token')
+
+        if not uidb64 or not token:
+            return Response({"valid": False}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            return Response({"valid": False}, status=status.HTTP_400_BAD_REQUEST)
+
+        if account_activation_token.check_token(user, token):
+            return Response({"valid": True}, status=status.HTTP_200_OK)
+        else:
+            return Response({"valid": False}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class InvitedUserProfileAPI(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -280,8 +291,6 @@ class InvitedUserProfileAPI(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except UserProfile.DoesNotExist:
             return Response({"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND)
-
-
 
 
 class ListInvitedUsersAPI(generics.ListAPIView):

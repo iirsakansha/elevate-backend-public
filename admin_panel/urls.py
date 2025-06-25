@@ -14,7 +14,9 @@ urlpatterns = [
     path('api/password-reset-confirm/<uidb64>/<token>/',
          views.password_reset_confirm, name='password_reset_confirm'),
     path('api/password-reset/', views.PasswordResetAPI.as_view(),
-         name='password_reset'),  # Add this line
+         name='password_reset'),
+    path('api/password-reset/validate/',
+         views.PasswordResetLinkValidateAPI.as_view(), name='password_reset_validate'),
     path('admin/invite-user/', views.InviteUserAPI.as_view(),
          name='admin_invite_user'),
     path('api/admin-login/', views.AdminLoginAPI.as_view(), name='admin_login'),
