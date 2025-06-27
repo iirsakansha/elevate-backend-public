@@ -18,14 +18,18 @@ from knox.models import AuthToken
 
 from EVTools.serializers import LoginUserSerializer
 from EVTools.serializers import UserSerializer
-from .models import UserProfile
-from .serializers import PasswordResetNoEmailSerializer, SetPasswordSerializer, InvitedUserProfileSerializer
 from .utils import account_activation_token
 from urllib.parse import quote
 import logging
 from datetime import datetime
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.tokens import default_token_generator
+from django.middleware.csrf import get_token
+from .models import UserProfile, Template
+from .serializers import (
+    SetPasswordSerializer, PasswordResetSerializer, PasswordResetNoEmailSerializer,
+    InvitedUserProfileSerializer, TemplateSerializer
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,3 +349,38 @@ class DeleteInvitedUserAPI(APIView):
                 {"error": "Failed to delete user", "details": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class TemplateListCreateAPI(generics.ListCreateAPIView):
+    queryset = Template.objects.all()
+    serializer_class = TemplateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # If user is staff/admin, return all templates
+        if self.request.user.is_staff:
+            return Template.objects.all()
+        # For regular users, return only their templates
+        return Template.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        # For regular users, associate with their account
+        if not self.request.user.is_staff:
+            serializer.save(user=self.request.user)
+        else:
+            # For admin, save without user association or with specified user
+            serializer.save()
+
+
+class TemplateRetrieveUpdateDestroyAPI(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Template.objects.all()
+    serializer_class = TemplateSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
+    
+    def get_queryset(self):
+        return Template.objects.filter(user=self.request.user)
+
+    def perform_update(self, serializer):
+        # Ensure the user cannot change the associated user
+        serializer.save(user=self.request.user)

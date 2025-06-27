@@ -26,4 +26,8 @@ urlpatterns = [
          name='list_invited_users'),
     path('api/delete-user/<int:id>/',
          views.DeleteInvitedUserAPI.as_view(), name='delete_invited_user'),
+    path('api/templates/', views.TemplateListCreateAPI.as_view(),
+         name='template_list_create'),
+    path('api/templates/<int:id>/', views.TemplateRetrieveUpdateDestroyAPI.as_view(),
+         name='template_retrieve_update_destroy')
 ]
