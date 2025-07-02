@@ -1,9 +1,38 @@
-# myapp/serializers.py
-from .models import Template
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import UserProfile, Template
+from django.contrib.auth import authenticate
+from .models import PermanentAnalysis, UserProfile, LoadCategoryModel, VehicleCategoryModel, Analysis, Files, UserAnalysis
 import re
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'password')
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def create(self, validated_data):
+        user = User.objects.create_user(
+            validated_data['username'], validated_data['email'], validated_data['password'])
+        UserProfile.objects.create(user=user)
+        return user
+
+
+class LoginUserSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField()
+
+    def validate(self, data):
+        user = authenticate(**data)
+        if user and user.is_active:
+            return user
+        raise serializers.ValidationError("Invalid credentials")
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True)
+
 
 class SetPasswordSerializer(serializers.Serializer):
     new_password = serializers.CharField(min_length=6, write_only=True)
@@ -12,12 +41,13 @@ class SetPasswordSerializer(serializers.Serializer):
 class PasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()
     new_password = serializers.CharField(min_length=6, write_only=True)
-   
+
 
 class PasswordResetNoEmailSerializer(serializers.Serializer):
     new_password = serializers.CharField(min_length=6)
     uidb64 = serializers.CharField()
     token = serializers.CharField()
+
 
 class InvitedUserProfileSerializer(serializers.ModelSerializer):
     organization = serializers.CharField(
@@ -25,8 +55,7 @@ class InvitedUserProfileSerializer(serializers.ModelSerializer):
     status = serializers.CharField(
         source='profile.invitation_status', default='Pending')
     created_at = serializers.DateTimeField(
-        source='profile.created_at', read_only=True
-    )
+        source='profile.created_at', read_only=True)
 
     class Meta:
         model = User
@@ -40,75 +69,64 @@ class InvitedUserProfileSerializer(serializers.ModelSerializer):
         return data
 
 
-class TemplateSerializer(serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'last_login', 'first_name',
+                  'last_name', 'username', 'email')
+
+
+class LoadCategoryModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LoadCategoryModel
+        fields = ['id', 'category', 'categoryFile',
+                  'salesCAGR', 'specifySplit']
+
+
+class VehicleCategoryModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VehicleCategoryModel
+        fields = ['id', 'vehicleCategory', 'n', 'f', 'c', 'p', 'e', 'r',
+                  'k', 'l', 'g', 'h', 's', 'u', 'CAGR_V', 'baseElectricityTariff']
+
+
+class AnalysisSerializer(serializers.ModelSerializer):
     formData = serializers.JSONField(write_only=True, required=False)
+    category_data = serializers.JSONField(default=list)
+    vehicle_category_data = serializers.JSONField(default=list)
 
     class Meta:
-        model = Template
+        model = Analysis
         fields = [
-            'id', 'name', 'dateCreated', 'formData',
-            'load_category', 'is_load_split', 'is_load_split_file', 'category_data',
-            'num_of_vehicle_category', 'vehicle_category_data',
-            'resolution', 'br_f', 'shared_saving', 'sum_pk_cost', 'sum_zero_cost', 'sum_op_cost',
-            'win_pk_cost', 'win_zero_cost', 'win_op_cost',
-            'summer_date', 'winter_date', 's_pks', 's_pke', 's_sx', 's_ops', 's_ope', 's_rb',
+            'id', 'name', 'created_at', 'updated_at', 'formData',
+            'loadCategory', 'isLoadSplit', 'isLoadSplitFile', 'category_data',
+            'loadCategory1', 'loadCategory2', 'loadCategory3', 'loadCategory4', 'loadCategory5', 'loadCategory6',
+            'numOfvehicleCategory', 'vehicle_category_data',
+            'vehicleCategoryData1', 'vehicleCategoryData2', 'vehicleCategoryData3', 'vehicleCategoryData4', 'vehicleCategoryData5',
+            'resolution', 'BR_F', 'shared_saving', 'sum_pk_cost', 'sum_zero_cost', 'sum_op_cost',
+            'win_pk_cost', 'win_zero_cost', 'win_op_cost', 'summer_date', 'winter_date',
+            's_pks', 's_pke', 's_sx', 's_ops', 's_ope', 's_rb',
             'w_pks', 'w_pke', 'w_sx', 'w_ops', 'w_ope', 'w_rb',
-            'date1_start', 'date1_end', 'date2_start', 'date2_end'
+            'date1_start', 'date1_end', 'date2_start', 'date2_end', 'fileId', 'user_name'
         ]
-        read_only_fields = ['id', 'dateCreated']
-        extra_kwargs = {
-            'load_category': {'required': False},
-            'is_load_split': {'required': False},
-            'is_load_split_file': {'required': False, 'allow_blank': True},
-            'category_data': {'required': False},
-            'num_of_vehicle_category': {'required': False},
-            'vehicle_category_data': {'required': False},
-            'resolution': {'required': False},
-            'br_f': {'required': False, 'allow_blank': True},
-            'shared_saving': {'required': False},
-            'sum_pk_cost': {'required': False},
-            'sum_zero_cost': {'required': False},
-            'sum_op_cost': {'required': False},
-            'win_pk_cost': {'required': False},
-            'win_zero_cost': {'required': False},
-            'win_op_cost': {'required': False},
-            'summer_date': {'required': False},
-            'winter_date': {'required': False},
-            's_pks': {'required': False, 'allow_blank': True},
-            's_pke': {'required': False, 'allow_blank': True},
-            's_sx': {'required': False, 'allow_blank': True},
-            's_ops': {'required': False, 'allow_blank': True},
-            's_ope': {'required': False, 'allow_blank': True},
-            's_rb': {'required': False, 'allow_blank': True},
-            'w_pks': {'required': False, 'allow_blank': True},
-            'w_pke': {'required': False, 'allow_blank': True},
-            'w_sx': {'required': False, 'allow_blank': True},
-            'w_ops': {'required': False, 'allow_blank': True},
-            'w_ope': {'required': False, 'allow_blank': True},
-            'w_rb': {'required': False, 'allow_blank': True},
-            'date1_start': {'required': False, 'allow_blank': True},
-            'date1_end': {'required': False, 'allow_blank': True},
-            'date2_start': {'required': False, 'allow_blank': True},
-            'date2_end': {'required': False, 'allow_blank': True},
-        }
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def to_representation(self, instance):
-        """Convert model instance to JSON representation"""
         data = super().to_representation(instance)
         data['formData'] = {
             'form1': {
-                'load_category': instance.load_category,
-                'is_load_split': instance.is_load_split,
-                'is_load_split_file': instance.is_load_split_file,
+                'loadCategory': instance.loadCategory,
+                'isLoadSplit': instance.isLoadSplit,
+                'isLoadSplitFile': instance.isLoadSplitFile,
                 'category_data': instance.category_data,
             },
             'form2': {
-                'num_of_vehicle_category': instance.num_of_vehicle_category,
+                'numOfvehicleCategory': instance.numOfvehicleCategory,
                 'vehicle_category_data': instance.vehicle_category_data,
             },
             'form3': {
                 'resolution': instance.resolution,
-                'br_f': instance.br_f,
+                'BR_F': instance.BR_F,
                 'shared_saving': instance.shared_saving,
                 'sum_pk_cost': instance.sum_pk_cost,
                 'sum_zero_cost': instance.sum_zero_cost,
@@ -139,9 +157,9 @@ class TemplateSerializer(serializers.ModelSerializer):
             },
         }
         fields_to_remove = [
-            'load_category', 'is_load_split', 'is_load_split_file', 'category_data',
-            'num_of_vehicle_category', 'vehicle_category_data',
-            'resolution', 'br_f', 'shared_saving', 'sum_pk_cost', 'sum_zero_cost', 'sum_op_cost',
+            'loadCategory', 'isLoadSplit', 'isLoadSplitFile', 'category_data',
+            'numOfvehicleCategory', 'vehicle_category_data',
+            'resolution', 'BR_F', 'shared_saving', 'sum_pk_cost', 'sum_zero_cost', 'sum_op_cost',
             'win_pk_cost', 'win_zero_cost', 'win_op_cost',
             'summer_date', 'winter_date', 's_pks', 's_pke', 's_sx', 's_ops', 's_ope', 's_rb',
             'w_pks', 'w_pke', 'w_sx', 'w_ops', 'w_ope', 'w_rb',
@@ -168,19 +186,18 @@ class TemplateSerializer(serializers.ModelSerializer):
 
     def _extract_form_data(self, validated_data, form_data):
         form1 = form_data.get('form1', {})
-        validated_data['load_category'] = int(form1.get('load_category', 0))
-        validated_data['is_load_split'] = form1.get('is_load_split', '')
-        validated_data['is_load_split_file'] = form1.get(
-            'is_load_split_file', '')
+        validated_data['loadCategory'] = int(form1.get('loadCategory', 0))
+        validated_data['isLoadSplit'] = form1.get('isLoadSplit', '')
+        validated_data['isLoadSplitFile'] = form1.get('isLoadSplitFile', '')
         validated_data['category_data'] = form1.get('category_data', [])
         form2 = form_data.get('form2', {})
-        validated_data['num_of_vehicle_category'] = int(
-            form2.get('num_of_vehicle_category', 0))
+        validated_data['numOfvehicleCategory'] = int(
+            form2.get('numOfvehicleCategory', 0))
         validated_data['vehicle_category_data'] = form2.get(
             'vehicle_category_data', [])
         form3 = form_data.get('form3', {})
         validated_data['resolution'] = int(form3.get('resolution', 0))
-        validated_data['br_f'] = form3.get('br_f', '')
+        validated_data['BR_F'] = form3.get('BR_F', '')
         validated_data['shared_saving'] = int(form3.get('shared_saving', 0))
         for field in ['sum_pk_cost', 'sum_zero_cost', 'sum_op_cost', 'win_pk_cost', 'win_zero_cost', 'win_op_cost']:
             try:
@@ -209,14 +226,14 @@ class TemplateSerializer(serializers.ModelSerializer):
 
     def _set_defaults(self, validated_data):
         defaults = {
-            'load_category': 0,
-            'is_load_split': '',
-            'is_load_split_file': '',
+            'loadCategory': 0,
+            'isLoadSplit': '',
+            'isLoadSplitFile': '',
             'category_data': [],
-            'num_of_vehicle_category': 0,
+            'numOfvehicleCategory': 0,
             'vehicle_category_data': [],
             'resolution': 0,
-            'br_f': '',
+            'BR_F': '',
             'shared_saving': 0,
             'sum_pk_cost': 0.0,
             'sum_zero_cost': 0.0,
@@ -242,6 +259,8 @@ class TemplateSerializer(serializers.ModelSerializer):
             'date1_end': '',
             'date2_start': '',
             'date2_end': '',
+            'fileId': 0,
+            'user_name': '',
         }
         for field, default_value in defaults.items():
             if field not in validated_data:
@@ -309,3 +328,73 @@ class TemplateSerializer(serializers.ModelSerializer):
 
     def validate_w_ope(self, value):
         return self._validate_time_format(value, "w_ope")
+
+
+class FilesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Files
+        fields = ['file', 'id']
+
+
+class UserAnalysisSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserAnalysis
+        fields = ['id', 'userName', 'status', 'errorLog', 'time']
+
+
+class PermanentAnalysisSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PermanentAnalysis
+        fields = '__all__'
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        data = request.data
+
+        # Merge form1–4 into model fields
+        form1 = data.get('formData', {}).get('form1', {})
+        form2 = data.get('formData', {}).get('form2', {})
+        form3 = data.get('formData', {}).get('form3', {})
+        form4 = data.get('formData', {}).get('form4', {})
+
+        # Map values from nested form fields into flat model fields
+        validated_data.update({
+            'loadCategory': form1.get('load_category', 0),
+            'isLoadSplit': form1.get('is_load_split', ''),
+            'isLoadSplitFile': form1.get('is_load_split_file', ''),
+            'category_data': form1.get('category_data', []),
+
+            'numOfvehicleCategory': form2.get('num_of_vehicle_category', 0),
+            'vehicle_category_data': form2.get('vehicle_category_data', []),
+
+            'resolution': form3.get('resolution', 0),
+            'BR_F': form3.get('br_f', ''),
+            'shared_saving': form3.get('shared_saving', 0),
+            'sum_pk_cost': form3.get('sum_pk_cost', 0),
+            'sum_zero_cost': form3.get('sum_zero_cost', 0),
+            'sum_op_cost': form3.get('sum_op_cost', 0),
+            'win_pk_cost': form3.get('win_pk_cost', 0),
+            'win_zero_cost': form3.get('win_zero_cost', 0),
+            'win_op_cost': form3.get('win_op_cost', 0),
+
+            'summer_date': form4.get('summer_date', []),
+            'winter_date': form4.get('winter_date', []),
+            'date1_start': form4.get('date1_start', ''),
+            'date1_end': form4.get('date1_end', ''),
+            'date2_start': form4.get('date2_start', ''),
+            'date2_end': form4.get('date2_end', ''),
+            's_pks': form4.get('s_pks', ''),
+            's_pke': form4.get('s_pke', ''),
+            's_ops': form4.get('s_ops', ''),
+            's_ope': form4.get('s_ope', ''),
+            's_sx': form4.get('s_sx', 0),
+            's_rb': form4.get('s_rb', 0),
+            'w_pks': form4.get('w_pks', ''),
+            'w_pke': form4.get('w_pke', ''),
+            'w_ops': form4.get('w_ops', ''),
+            'w_ope': form4.get('w_ope', ''),
+            'w_sx': form4.get('w_sx', 0),
+            'w_rb': form4.get('w_rb', 0),
+        })
+
+        return super().create(validated_data)

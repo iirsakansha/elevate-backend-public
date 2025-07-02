@@ -12,19 +12,9 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 
 import os
 from datetime import timedelta
-# from rest_framework.settings import api_settings
-
-# Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'mon+-xmq(&ax-eukkwf%j%(z5&^mn+g2wp(0hgz7ely$ib5y&k'
-
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 CORS_ORIGIN_ALLOW_ALL = True
@@ -51,8 +41,6 @@ CORS_ALLOW_HEADERS = [
 ]
 
 
-# Application definition
-
 INSTALLED_APPS = [
     'admin_interface',
     'colorfield',
@@ -62,11 +50,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'EVTools',
     'rest_framework',
-    'corsheaders',
-    'knox',     
-    'admin_panel.apps.AdminPanelConfig',
+    'knox',
+    'elevate',
 ]
 
 MIDDLEWARE = [
@@ -101,10 +87,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'PythonGUI.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/3.0/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -115,10 +97,6 @@ DATABASES = {
         }
     }
 }
-
-
-# Password validation
-# https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -135,10 +113,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/3.0/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'Asia/Kolkata'
@@ -149,9 +123,6 @@ USE_L10N = True
 
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/3.0/howto/static-files/
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 STATIC_URL = '/static/'
@@ -159,13 +130,12 @@ MEDIA_URL = '/media/'
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        # 'rest_framework.authentication.BasicAuthentication',
-        # 'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
         'knox.auth.TokenAuthentication',
-
     ],
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
@@ -174,7 +144,7 @@ REST_FRAMEWORK = {
     ],
 }
 REST_KNOX = {
-    'TOKEN_TTL': timedelta(hours=12),  # default time 10h now 2h
+    'TOKEN_TTL': timedelta(hours=12),
 }
 
 
@@ -212,3 +182,5 @@ LOGGING = {
         },
     },
 }
+
+FRONTEND_URL = 'http://localhost:5173'
