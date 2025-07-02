@@ -19,10 +19,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 urlpatterns = [
-    # path('superadmin/', admin.site.urls),
-    path('', include(('EVTools.urls', 'EVTools'), namespace='EVTools')),
-    path('auth/', include('rest_framework.urls')),
-    path('admin_panel/', include('admin_panel.urls')),
+    path('', include(('elevate.urls', 'elevate'), namespace='elevate')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL,
