@@ -1096,11 +1096,11 @@ class IsAdminUser(permissions.BasePermission):
 class PermanentAnalysisListCreateAPI(generics.ListCreateAPIView):
     queryset = PermanentAnalysis.objects.all()
     serializer_class = PermanentAnalysisSerializer
-    permission_classes = [IsAdminUser]
 
-    def get_serializer_context(self):
-        return {'request': self.request}
-
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
 
 
 class PermanentAnalysisRetrieveUpdateDestroyAPI(generics.RetrieveUpdateDestroyAPIView):
