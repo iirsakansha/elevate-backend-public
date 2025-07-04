@@ -19,6 +19,7 @@ class UserProfile(models.Model):
     password_reset_token = models.CharField(
         max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)
+    role = models.CharField(max_length=50, default='user')
 
     def __str__(self):
         return f"Profile for {self.user.username}"

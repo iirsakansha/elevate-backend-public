@@ -40,7 +40,6 @@ class SetPasswordSerializer(serializers.Serializer):
 
 class PasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    new_password = serializers.CharField(min_length=6, write_only=True)
 
 
 class PasswordResetNoEmailSerializer(serializers.Serializer):
