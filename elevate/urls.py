@@ -22,8 +22,11 @@ urlpatterns = [
          views.password_reset_confirm, name='password_reset_confirm'),
     path('api/password-reset/', views.PasswordResetAPI.as_view(),
          name='password_reset'),
-    path('api/password-reset/validate/',
-         views.PasswordResetLinkValidateAPI.as_view(), name='password_reset_validate'),
+    path(
+        'api/password-reset/validate/<str:uidb64>/<str:token>/',
+        views.PasswordResetLinkValidateAPI.as_view(),
+        name='password_reset_validate'
+    ),
     path('api/invitation/<str:token>/',
          views.GetInvitationDetailsAPI.as_view(), name='get_invitation_details'),
     path('api/invited-users/all/', views.ListInvitedUsersAPI.as_view(),
@@ -43,6 +46,4 @@ urlpatterns = [
          name='permanent_analysis_list_create'),
     path('api/permanent-analyses/<int:pk>/', views.PermanentAnalysisRetrieveUpdateDestroyAPI.as_view(),
          name='permanent_analysis_retrieve_update_destroy'),
-
-
 ]
