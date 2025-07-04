@@ -399,6 +399,7 @@ class AnalysisView(APIView):
         created_load_categories = []
         created_vehicle_categories = []
         file_path = None
+        ev_instance = None
         start_time = time.time()
         try:
             logger.info(
