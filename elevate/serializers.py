@@ -350,50 +350,99 @@ class PermanentAnalysisSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         data = request.data
 
-        # Merge form1–4 into model fields
-        form1 = data.get('formData', {}).get('form1', {})
-        form2 = data.get('formData', {}).get('form2', {})
-        form3 = data.get('formData', {}).get('form3', {})
-        form4 = data.get('formData', {}).get('form4', {})
-
-        # Map values from nested form fields into flat model fields
+        # Map camelCase keys to snake_case fields
         validated_data.update({
-            'loadCategory': form1.get('load_category', 0),
-            'isLoadSplit': form1.get('is_load_split', ''),
-            'isLoadSplitFile': form1.get('is_load_split_file', ''),
-            'category_data': form1.get('category_data', []),
+            'name': data.get('name', ''),
+            'loadCategory': data.get('loadCategory', 0),
+            'isLoadSplit': data.get('isLoadSplit', ''),
+            'isLoadSplitFile': data.get('isLoadSplitFile', ''),
+            'category_data': data.get('categoryData', []),
 
-            'numOfvehicleCategory': form2.get('num_of_vehicle_category', 0),
-            'vehicle_category_data': form2.get('vehicle_category_data', []),
+            'numOfvehicleCategory': data.get('numOfvehicleCategory', 0),
+            'vehicle_category_data': data.get('vehicleCategoryData', []),
 
-            'resolution': form3.get('resolution', 0),
-            'BR_F': form3.get('br_f', ''),
-            'shared_saving': form3.get('shared_saving', 0),
-            'sum_pk_cost': form3.get('sum_pk_cost', 0),
-            'sum_zero_cost': form3.get('sum_zero_cost', 0),
-            'sum_op_cost': form3.get('sum_op_cost', 0),
-            'win_pk_cost': form3.get('win_pk_cost', 0),
-            'win_zero_cost': form3.get('win_zero_cost', 0),
-            'win_op_cost': form3.get('win_op_cost', 0),
+            'resolution': data.get('resolution', 0),
+            'BR_F': data.get('BR_F', ''),
+            'shared_saving': data.get('shared_saving', 0),
+            'sum_pk_cost': data.get('sum_pk_cost', 0),
+            'sum_zero_cost': data.get('sum_zero_cost', 0),
+            'sum_op_cost': data.get('sum_op_cost', 0),
+            'win_pk_cost': data.get('win_pk_cost', 0),
+            'win_zero_cost': data.get('win_zero_cost', 0),
+            'win_op_cost': data.get('win_op_cost', 0),
 
-            'summer_date': form4.get('summer_date', []),
-            'winter_date': form4.get('winter_date', []),
-            'date1_start': form4.get('date1_start', ''),
-            'date1_end': form4.get('date1_end', ''),
-            'date2_start': form4.get('date2_start', ''),
-            'date2_end': form4.get('date2_end', ''),
-            's_pks': form4.get('s_pks', ''),
-            's_pke': form4.get('s_pke', ''),
-            's_ops': form4.get('s_ops', ''),
-            's_ope': form4.get('s_ope', ''),
-            's_sx': form4.get('s_sx', 0),
-            's_rb': form4.get('s_rb', 0),
-            'w_pks': form4.get('w_pks', ''),
-            'w_pke': form4.get('w_pke', ''),
-            'w_ops': form4.get('w_ops', ''),
-            'w_ope': form4.get('w_ope', ''),
-            'w_sx': form4.get('w_sx', 0),
-            'w_rb': form4.get('w_rb', 0),
+            'summer_date': data.get('summerDate', []),
+            'winter_date': data.get('winterDate', []),
+            'date1_start': data.get('date1_start', ''),
+            'date1_end': data.get('date1_end', ''),
+            'date2_start': data.get('date2_start', ''),
+            'date2_end': data.get('date2_end', ''),
+
+            's_pks': data.get('s_pks', ''),
+            's_pke': data.get('s_pke', ''),
+            's_ops': data.get('s_ops', ''),
+            's_ope': data.get('s_ope', ''),
+            's_sx': data.get('s_sx', 0),
+            's_rb': data.get('s_rb', 0),
+            'w_pks': data.get('w_pks', ''),
+            'w_pke': data.get('w_pke', ''),
+            'w_ops': data.get('w_ops', ''),
+            'w_ope': data.get('w_ope', ''),
+            'w_sx': data.get('w_sx', 0),
+            'w_rb': data.get('w_rb', 0),
         })
 
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        data = self.context['request'].data
+
+        # Update fields using camelCase keys from frontend
+        instance.name = data.get('name', instance.name)
+        instance.loadCategory = data.get('loadCategory', instance.loadCategory)
+        instance.isLoadSplit = data.get('isLoadSplit', instance.isLoadSplit)
+        instance.isLoadSplitFile = data.get(
+            'isLoadSplitFile', instance.isLoadSplitFile)
+        instance.category_data = data.get(
+            'categoryData', instance.category_data)
+
+        instance.numOfvehicleCategory = data.get(
+            'numOfvehicleCategory', instance.numOfvehicleCategory)
+        instance.vehicle_category_data = data.get(
+            'vehicleCategoryData', instance.vehicle_category_data)
+
+        instance.resolution = data.get('resolution', instance.resolution)
+        instance.BR_F = data.get('BR_F', instance.BR_F)
+        instance.shared_saving = data.get(
+            'shared_saving', instance.shared_saving)
+        instance.sum_pk_cost = data.get('sum_pk_cost', instance.sum_pk_cost)
+        instance.sum_zero_cost = data.get(
+            'sum_zero_cost', instance.sum_zero_cost)
+        instance.sum_op_cost = data.get('sum_op_cost', instance.sum_op_cost)
+        instance.win_pk_cost = data.get('win_pk_cost', instance.win_pk_cost)
+        instance.win_zero_cost = data.get(
+            'win_zero_cost', instance.win_zero_cost)
+        instance.win_op_cost = data.get('win_op_cost', instance.win_op_cost)
+
+        instance.summer_date = data.get('summerDate', instance.summer_date)
+        instance.winter_date = data.get('winterDate', instance.winter_date)
+        instance.date1_start = data.get('date1_start', instance.date1_start)
+        instance.date1_end = data.get('date1_end', instance.date1_end)
+        instance.date2_start = data.get('date2_start', instance.date2_start)
+        instance.date2_end = data.get('date2_end', instance.date2_end)
+
+        instance.s_pks = data.get('s_pks', instance.s_pks)
+        instance.s_pke = data.get('s_pke', instance.s_pke)
+        instance.s_ops = data.get('s_ops', instance.s_ops)
+        instance.s_ope = data.get('s_ope', instance.s_ope)
+        instance.s_sx = data.get('s_sx', instance.s_sx)
+        instance.s_rb = data.get('s_rb', instance.s_rb)
+        instance.w_pks = data.get('w_pks', instance.w_pks)
+        instance.w_pke = data.get('w_pke', instance.w_pke)
+        instance.w_ops = data.get('w_ops', instance.w_ops)
+        instance.w_ope = data.get('w_ope', instance.w_ope)
+        instance.w_sx = data.get('w_sx', instance.w_sx)
+        instance.w_rb = data.get('w_rb', instance.w_rb)
+
+        instance.save()
+        return instance
