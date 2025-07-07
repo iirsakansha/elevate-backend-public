@@ -1,28 +1,38 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from .models import PermanentAnalysis, UserProfile, LoadCategoryModel, VehicleCategoryModel, Analysis, Files, UserAnalysis
-import re
+from .models import (
+    PermanentAnalysis, UserProfile, LoadCategoryModel,
+    VehicleCategoryModel, Analysis, Files, UserAnalysis
+)
+from datetime import datetime
 
 
 class RegisterSerializer(serializers.ModelSerializer):
+    """Serializer for user registration."""
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'password')
+        fields = ['id', 'username', 'email', 'password']
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
+        """Create a new user and associated profile."""
         user = User.objects.create_user(
-            validated_data['username'], validated_data['email'], validated_data['password'])
+            validated_data['username'],
+            validated_data['email'],
+            validated_data['password']
+        )
         UserProfile.objects.create(user=user)
         return user
 
 
 class LoginUserSerializer(serializers.Serializer):
+    """Serializer for user login."""
     username = serializers.CharField()
-    password = serializers.CharField()
+    password = serializers.CharField(write_only=True)
 
     def validate(self, data):
+        """Validate user credentials."""
         user = authenticate(**data)
         if user and user.is_active:
             return user
@@ -30,25 +40,31 @@ class LoginUserSerializer(serializers.Serializer):
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    old_password = serializers.CharField(required=True)
-    new_password = serializers.CharField(required=True)
+    """Serializer for changing user password."""
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(
+        required=True, write_only=True, min_length=6)
 
 
 class SetPasswordSerializer(serializers.Serializer):
+    """Serializer for setting a new password for invited users."""
     new_password = serializers.CharField(min_length=6, write_only=True)
 
 
 class PasswordResetSerializer(serializers.Serializer):
+    """Serializer for password reset request."""
     email = serializers.EmailField()
 
 
 class PasswordResetNoEmailSerializer(serializers.Serializer):
-    new_password = serializers.CharField(min_length=6)
+    """Serializer for password reset with token."""
+    new_password = serializers.CharField(min_length=6, write_only=True)
     uidb64 = serializers.CharField()
     token = serializers.CharField()
 
 
 class InvitedUserProfileSerializer(serializers.ModelSerializer):
+    """Serializer for invited user profile."""
     organization = serializers.CharField(
         source='profile.organization', default='Not assigned')
     status = serializers.CharField(
@@ -62,6 +78,7 @@ class InvitedUserProfileSerializer(serializers.ModelSerializer):
                   'organization', 'status', 'created_at']
 
     def validate(self, data):
+        """Validate that the user account is active."""
         user = self.instance
         if user and not user.is_active:
             raise serializers.ValidationError("Account not activated")
@@ -69,380 +86,342 @@ class InvitedUserProfileSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    """Serializer for user details."""
     class Meta:
         model = User
-        fields = ('id', 'last_login', 'first_name',
-                  'last_name', 'username', 'email')
+        fields = ['id', 'last_login', 'first_name',
+                  'last_name', 'username', 'email']
 
 
 class LoadCategoryModelSerializer(serializers.ModelSerializer):
+    """Serializer for LoadCategoryModel."""
     class Meta:
         model = LoadCategoryModel
-        fields = ['id', 'category', 'categoryFile',
-                  'salesCAGR', 'specifySplit']
+        fields = ['id', 'category', 'category_file',
+                  'sales_cagr', 'specify_split']
+
+    def validate(self, data):
+        """Validate load category data."""
+        if data.get('sales_cagr', 0) < 0:
+            raise serializers.ValidationError(
+                "sales_cagr must be non-negative")
+        if data.get('specify_split', 0) < 0:
+            raise serializers.ValidationError(
+                "specify_split must be non-negative")
+        return data
 
 
 class VehicleCategoryModelSerializer(serializers.ModelSerializer):
+    """Serializer for VehicleCategoryModel."""
     class Meta:
         model = VehicleCategoryModel
-        fields = ['id', 'vehicleCategory', 'n', 'f', 'c', 'p', 'e', 'r',
-                  'k', 'l', 'g', 'h', 's', 'u', 'CAGR_V', 'baseElectricityTariff']
+        fields = [
+            'id', 'vehicle_category', 'vehicle_count', 'fuel_efficiency', 'cost_per_unit',
+            'penetration_rate', 'energy_consumption', 'range_km', 'kwh_capacity',
+            'lifespan_years', 'growth_rate', 'handling_cost', 'subsidy_amount',
+            'usage_factor', 'row_limit_xl', 'cagr_v', 'base_electricity_tariff'
+        ]
+
+    def validate(self, data):
+        """Validate vehicle category data."""
+        numeric_fields = [
+            'vehicle_count', 'fuel_efficiency', 'cost_per_unit', 'penetration_rate',
+            'energy_consumption', 'range_km', 'kwh_capacity', 'lifespan_years',
+            'growth_rate', 'handling_cost', 'subsidy_amount', 'usage_factor',
+            'cagr_v', 'base_electricity_tariff'
+        ]
+        for field in numeric_fields:
+            if field in data and data[field] is not None and data[field] < 0:
+                raise serializers.ValidationError(
+                    f"{field} must be non-negative")
+        if 'fuel_efficiency' in data and data['fuel_efficiency'] > 100:
+            raise serializers.ValidationError(
+                "fuel_efficiency must be between 0 and 100")
+        if 'subsidy_amount' in data and data['subsidy_amount'] > 100:
+            raise serializers.ValidationError(
+                "subsidy_amount must be between 0 and 100")
+        if 'handling_cost' in data and data['handling_cost'] > 100:
+            raise serializers.ValidationError(
+                "handling_cost must be between 0 and 100")
+        if 'cagr_v' in data and data['cagr_v'] > 100:
+            raise serializers.ValidationError(
+                "cagr_v must be between 0 and 100")
+        return data
+
+
+class PermanentAnalysisSerializer(serializers.ModelSerializer):
+    """Serializer for PermanentAnalysis."""
+    category_data = LoadCategoryModelSerializer(many=True)
+    vehicle_category_data = VehicleCategoryModelSerializer(many=True)
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = PermanentAnalysis
+        fields = [
+            'id', 'user', 'name', 'load_category_count', 'load_split_file',
+            'category_data', 'vehicle_category_count', 'vehicle_category_data',
+            'resolution', 'br_f', 'shared_saving', 'summer_peak_cost',
+            'summer_zero_cost', 'summer_op_cost', 'winter_peak_cost',
+            'winter_zero_cost', 'winter_op_cost', 'summer_date', 'winter_date',
+            'summer_peak_start', 'summer_peak_end', 'summer_op_start',
+            'summer_op_end', 'winter_peak_start', 'winter_peak_end',
+            'winter_op_start', 'winter_op_end', 'summer_sx', 'summer_rb',
+            'winter_sx', 'winter_rb', 'date1_start', 'date1_end', 'date2_start',
+            'date2_end', 'created_at', 'updated_at'
+        ]
+
+    def validate(self, data):
+        """Validate PermanentAnalysis data."""
+        # Validate load_category_count and category_data
+        load_category_count = data.get('load_category_count', 0)
+        category_data = data.get('category_data', [])
+        if load_category_count != len(category_data):
+            raise serializers.ValidationError(
+                "load_category_count must match the number of category_data entries"
+            )
+        if load_category_count < 1 or load_category_count > 6:
+            raise serializers.ValidationError(
+                "load_category_count must be between 1 and 6"
+            )
+        total_split = sum(item.get('specify_split', 0)
+                          for item in category_data)
+        if abs(total_split - 100) > 0.01:
+            raise serializers.ValidationError(
+                "Sum of specify_split in category_data must be 100%"
+            )
+
+        # Validate vehicle_category_count and vehicle_category_data
+        vehicle_category_count = data.get('vehicle_category_count', 0)
+        vehicle_category_data = data.get('vehicle_category_data', [])
+        if vehicle_category_count != len(vehicle_category_data):
+            raise serializers.ValidationError(
+                "vehicle_category_count must match the number of vehicle_category_data entries"
+            )
+        if vehicle_category_count < 1 or vehicle_category_count > 5:
+            raise serializers.ValidationError(
+                "vehicle_category_count must be between 1 and 5"
+            )
+
+        # Validate numeric fields
+        numeric_fields = [
+            'resolution', 'shared_saving', 'summer_peak_cost', 'summer_zero_cost',
+            'summer_op_cost', 'winter_peak_cost', 'winter_zero_cost', 'winter_op_cost',
+            'summer_sx', 'summer_rb', 'winter_sx', 'winter_rb'
+        ]
+        for field in numeric_fields:
+            if field in data and data[field] is not None and data[field] < 0:
+                raise serializers.ValidationError(
+                    f"{field} must be non-negative")
+        if 'shared_saving' in data and data['shared_saving'] > 100:
+            raise serializers.ValidationError(
+                "shared_saving must be between 0 and 100")
+        if 'summer_sx' in data and data['summer_sx'] > 100:
+            raise serializers.ValidationError(
+                "summer_sx must be between 0 and 100")
+        if 'summer_rb' in data and data['summer_rb'] > 100:
+            raise serializers.ValidationError(
+                "summer_rb must be between 0 and 100")
+        if 'winter_sx' in data and data['winter_sx'] > 100:
+            raise serializers.ValidationError(
+                "winter_sx must be between 0 and 100")
+        if 'winter_rb' in data and data['winter_rb'] > 100:
+            raise serializers.ValidationError(
+                "winter_rb must be between 0 and 100")
+
+        # Validate date fields
+        for date_field in ['summer_date', 'winter_date']:
+            if date_field in data and not isinstance(data[date_field], list):
+                raise serializers.ValidationError(
+                    f"{date_field} must be a list")
+        for date_field in ['date1_start', 'date1_end', 'date2_start', 'date2_end']:
+            if date_field in data and data[date_field]:
+                try:
+                    datetime.strptime(data[date_field], '%b-%d')
+                except ValueError:
+                    raise serializers.ValidationError(
+                        f"{date_field} must be in MMM-DD format")
+
+        # Validate time fields
+        time_fields = [
+            'summer_peak_start', 'summer_peak_end', 'summer_op_start', 'summer_op_end',
+            'winter_peak_start', 'winter_peak_end', 'winter_op_start', 'winter_op_end'
+        ]
+        for time_field in time_fields:
+            if time_field in data and data[time_field]:
+                try:
+                    datetime.strptime(data[time_field], '%H:%M')
+                except ValueError:
+                    raise serializers.ValidationError(
+                        f"{time_field} must be in HH:MM format")
+
+        return data
+
+    def create(self, validated_data):
+        """Create a new PermanentAnalysis instance."""
+        category_data = validated_data.pop('category_data', [])
+        vehicle_category_data = validated_data.pop('vehicle_category_data', [])
+        instance = PermanentAnalysis.objects.create(**validated_data)
+        for item in category_data:
+            LoadCategoryModel.objects.create(analysis=instance, **item)
+        for item in vehicle_category_data:
+            VehicleCategoryModel.objects.create(analysis=instance, **item)
+        return instance
+
+    def update(self, instance, validated_data):
+        """Update an existing PermanentAnalysis instance."""
+        category_data = validated_data.pop('category_data', [])
+        vehicle_category_data = validated_data.pop('vehicle_category_data', [])
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        instance.category_data.all().delete()
+        instance.vehicle_category_data.all().delete()
+        for item in category_data:
+            LoadCategoryModel.objects.create(analysis=instance, **item)
+        for item in vehicle_category_data:
+            VehicleCategoryModel.objects.create(analysis=instance, **item)
+        return instance
 
 
 class AnalysisSerializer(serializers.ModelSerializer):
-    formData = serializers.JSONField(write_only=True, required=False)
-    category_data = serializers.JSONField(default=list)
-    vehicle_category_data = serializers.JSONField(default=list)
+    """Serializer for Analysis."""
+    category_data = LoadCategoryModelSerializer(many=True)
+    vehicle_category_data = VehicleCategoryModelSerializer(many=True)
+    user = UserSerializer(read_only=True)
 
     class Meta:
         model = Analysis
         fields = [
-            'id', 'name', 'created_at', 'updated_at', 'formData',
-            'loadCategory', 'isLoadSplit', 'isLoadSplitFile', 'category_data',
-            'loadCategory1', 'loadCategory2', 'loadCategory3', 'loadCategory4', 'loadCategory5', 'loadCategory6',
-            'numOfvehicleCategory', 'vehicle_category_data',
-            'vehicleCategoryData1', 'vehicleCategoryData2', 'vehicleCategoryData3', 'vehicleCategoryData4', 'vehicleCategoryData5',
-            'resolution', 'BR_F', 'shared_saving', 'sum_pk_cost', 'sum_zero_cost', 'sum_op_cost',
-            'win_pk_cost', 'win_zero_cost', 'win_op_cost', 'summer_date', 'winter_date',
-            's_pks', 's_pke', 's_sx', 's_ops', 's_ope', 's_rb',
-            'w_pks', 'w_pke', 'w_sx', 'w_ops', 'w_ope', 'w_rb',
-            'date1_start', 'date1_end', 'date2_start', 'date2_end', 'fileId', 'user_name'
+            'id', 'user', 'name', 'load_category_count', 'load_split_file',
+            'category_data', 'vehicle_category_count', 'vehicle_category_data',
+            'resolution', 'br_f', 'shared_saving', 'summer_peak_cost',
+            'summer_zero_cost', 'summer_op_cost', 'winter_peak_cost',
+            'winter_zero_cost', 'winter_op_cost', 'summer_date', 'winter_date',
+            'summer_peak_start', 'summer_peak_end', 'summer_op_start',
+            'summer_op_end', 'winter_peak_start', 'winter_peak_end',
+            'winter_op_start', 'winter_op_end', 'summer_sx', 'summer_rb',
+            'winter_sx', 'winter_rb', 'date1_start', 'date1_end', 'date2_start',
+            'date2_end', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data['formData'] = {
-            'form1': {
-                'loadCategory': instance.loadCategory,
-                'isLoadSplit': instance.isLoadSplit,
-                'isLoadSplitFile': instance.isLoadSplitFile,
-                'category_data': instance.category_data,
-            },
-            'form2': {
-                'numOfvehicleCategory': instance.numOfvehicleCategory,
-                'vehicle_category_data': instance.vehicle_category_data,
-            },
-            'form3': {
-                'resolution': instance.resolution,
-                'BR_F': instance.BR_F,
-                'shared_saving': instance.shared_saving,
-                'sum_pk_cost': instance.sum_pk_cost,
-                'sum_zero_cost': instance.sum_zero_cost,
-                'sum_op_cost': instance.sum_op_cost,
-                'win_pk_cost': instance.win_pk_cost,
-                'win_zero_cost': instance.win_zero_cost,
-                'win_op_cost': instance.win_op_cost,
-            },
-            'form4': {
-                'summer_date': instance.summer_date,
-                'winter_date': instance.winter_date,
-                's_pks': instance.s_pks,
-                's_pke': instance.s_pke,
-                's_sx': instance.s_sx,
-                's_ops': instance.s_ops,
-                's_ope': instance.s_ope,
-                's_rb': instance.s_rb,
-                'w_pks': instance.w_pks,
-                'w_pke': instance.w_pke,
-                'w_sx': instance.w_sx,
-                'w_ops': instance.w_ops,
-                'w_ope': instance.w_ope,
-                'w_rb': instance.w_rb,
-                'date1_start': instance.date1_start,
-                'date1_end': instance.date1_end,
-                'date2_start': instance.date2_start,
-                'date2_end': instance.date2_end,
-            },
-        }
-        fields_to_remove = [
-            'loadCategory', 'isLoadSplit', 'isLoadSplitFile', 'category_data',
-            'numOfvehicleCategory', 'vehicle_category_data',
-            'resolution', 'BR_F', 'shared_saving', 'sum_pk_cost', 'sum_zero_cost', 'sum_op_cost',
-            'win_pk_cost', 'win_zero_cost', 'win_op_cost',
-            'summer_date', 'winter_date', 's_pks', 's_pke', 's_sx', 's_ops', 's_ope', 's_rb',
-            'w_pks', 'w_pke', 'w_sx', 'w_ops', 'w_ope', 'w_rb',
-            'date1_start', 'date1_end', 'date2_start', 'date2_end'
+    def validate(self, data):
+        """Validate Analysis data."""
+        # Same validation as PermanentAnalysisSerializer
+        load_category_count = data.get('load_category_count', 0)
+        category_data = data.get('category_data', [])
+        if load_category_count != len(category_data):
+            raise serializers.ValidationError(
+                "load_category_count must match the number of category_data entries"
+            )
+        if load_category_count < 1 or load_category_count > 6:
+            raise serializers.ValidationError(
+                "load_category_count must be between 1 and 6"
+            )
+        total_split = sum(item.get('specify_split', 0)
+                          for item in category_data)
+        if abs(total_split - 100) > 0.01:
+            raise serializers.ValidationError(
+                "Sum of specify_split in category_data must be 100%"
+            )
+
+        vehicle_category_count = data.get('vehicle_category_count', 0)
+        vehicle_category_data = data.get('vehicle_category_data', [])
+        if vehicle_category_count != len(vehicle_category_data):
+            raise serializers.ValidationError(
+                "vehicle_category_count must match the number of vehicle_category_data entries"
+            )
+        if vehicle_category_count < 1 or vehicle_category_count > 5:
+            raise serializers.ValidationError(
+                "vehicle_category_count must be between 1 and 5"
+            )
+
+        numeric_fields = [
+            'resolution', 'shared_saving', 'summer_peak_cost', 'summer_zero_cost',
+            'summer_op_cost', 'winter_peak_cost', 'winter_zero_cost', 'winter_op_cost',
+            'summer_sx', 'summer_rb', 'winter_sx', 'winter_rb'
         ]
-        for field in fields_to_remove:
-            data.pop(field, None)
+        for field in numeric_fields:
+            if field in data and data[field] is not None and data[field] < 0:
+                raise serializers.ValidationError(
+                    f"{field} must be non-negative")
+        if 'shared_saving' in data and data['shared_saving'] > 100:
+            raise serializers.ValidationError(
+                "shared_saving must be between 0 and 100")
+        if 'summer_sx' in data and data['summer_sx'] > 100:
+            raise serializers.ValidationError(
+                "summer_sx must be between 0 and 100")
+        if 'summer_rb' in data and data['summer_rb'] > 100:
+            raise serializers.ValidationError(
+                "summer_rb must be between 0 and 100")
+        if 'winter_sx' in data and data['winter_sx'] > 100:
+            raise serializers.ValidationError(
+                "winter_sx must be between 0 and 100")
+        if 'winter_rb' in data and data['winter_rb'] > 100:
+            raise serializers.ValidationError(
+                "winter_rb must be between 0 and 100")
+
+        for date_field in ['summer_date', 'winter_date']:
+            if date_field in data and not isinstance(data[date_field], list):
+                raise serializers.ValidationError(
+                    f"{date_field} must be a list")
+        for date_field in ['date1_start', 'date1_end', 'date2_start', 'date2_end']:
+            if date_field in data and data[date_field]:
+                try:
+                    datetime.strptime(data[date_field], '%b-%d')
+                except ValueError:
+                    raise serializers.ValidationError(
+                        f"{date_field} must be in MMM-DD format")
+
+        time_fields = [
+            'summer_peak_start', 'summer_peak_end', 'summer_op_start', 'summer_op_end',
+            'winter_peak_start', 'winter_peak_end', 'winter_op_start', 'winter_op_end'
+        ]
+        for time_field in time_fields:
+            if time_field in data and data[time_field]:
+                try:
+                    datetime.strptime(data[time_field], '%H:%M')
+                except ValueError:
+                    raise serializers.ValidationError(
+                        f"{time_field} must be in HH:MM format")
+
         return data
 
     def create(self, validated_data):
-        form_data = validated_data.pop('formData', {})
-        if form_data:
-            self._extract_form_data(validated_data, form_data)
-        self._set_defaults(validated_data)
-        validated_data['user'] = self.context['request'].user
-        return super().create(validated_data)
+        """Create a new Analysis instance."""
+        category_data = validated_data.pop('category_data', [])
+        vehicle_category_data = validated_data.pop('vehicle_category_data', [])
+        instance = Analysis.objects.create(**validated_data)
+        for item in category_data:
+            LoadCategoryModel.objects.create(analysis=instance, **item)
+        for item in vehicle_category_data:
+            VehicleCategoryModel.objects.create(analysis=instance, **item)
+        return instance
 
     def update(self, instance, validated_data):
-        form_data = validated_data.pop('formData', {})
-        if form_data:
-            self._extract_form_data(validated_data, form_data)
-        validated_data['user'] = instance.user
-        return super().update(instance, validated_data)
-
-    def _extract_form_data(self, validated_data, form_data):
-        form1 = form_data.get('form1', {})
-        validated_data['loadCategory'] = int(form1.get('loadCategory', 0))
-        validated_data['isLoadSplit'] = form1.get('isLoadSplit', '')
-        validated_data['isLoadSplitFile'] = form1.get('isLoadSplitFile', '')
-        validated_data['category_data'] = form1.get('category_data', [])
-        form2 = form_data.get('form2', {})
-        validated_data['numOfvehicleCategory'] = int(
-            form2.get('numOfvehicleCategory', 0))
-        validated_data['vehicle_category_data'] = form2.get(
-            'vehicle_category_data', [])
-        form3 = form_data.get('form3', {})
-        validated_data['resolution'] = int(form3.get('resolution', 0))
-        validated_data['BR_F'] = form3.get('BR_F', '')
-        validated_data['shared_saving'] = int(form3.get('shared_saving', 0))
-        for field in ['sum_pk_cost', 'sum_zero_cost', 'sum_op_cost', 'win_pk_cost', 'win_zero_cost', 'win_op_cost']:
-            try:
-                validated_data[field] = float(form3.get(field, 0.0) or 0.0)
-            except (ValueError, TypeError):
-                validated_data[field] = 0.0
-        form4 = form_data.get('form4', {})
-        validated_data['summer_date'] = form4.get('summer_date', [])
-        validated_data['winter_date'] = form4.get('winter_date', [])
-        validated_data['s_pks'] = form4.get('s_pks', '')
-        validated_data['s_pke'] = form4.get('s_pke', '')
-        validated_data['s_sx'] = form4.get('s_sx', '')
-        validated_data['s_ops'] = form4.get('s_ops', '')
-        validated_data['s_ope'] = form4.get('s_ope', '')
-        validated_data['s_rb'] = form4.get('s_rb', '')
-        validated_data['w_pks'] = form4.get('w_pks', '')
-        validated_data['w_pke'] = form4.get('w_pke', '')
-        validated_data['w_sx'] = form4.get('w_sx', '')
-        validated_data['w_ops'] = form4.get('w_ops', '')
-        validated_data['w_ope'] = form4.get('w_ope', '')
-        validated_data['w_rb'] = form4.get('w_rb', '')
-        validated_data['date1_start'] = form4.get('date1_start', '')[:10]
-        validated_data['date1_end'] = form4.get('date1_end', '')[:10]
-        validated_data['date2_start'] = form4.get('date2_start', '')[:10]
-        validated_data['date2_end'] = form4.get('date2_end', '')[:10]
-
-    def _set_defaults(self, validated_data):
-        defaults = {
-            'loadCategory': 0,
-            'isLoadSplit': '',
-            'isLoadSplitFile': '',
-            'category_data': [],
-            'numOfvehicleCategory': 0,
-            'vehicle_category_data': [],
-            'resolution': 0,
-            'BR_F': '',
-            'shared_saving': 0,
-            'sum_pk_cost': 0.0,
-            'sum_zero_cost': 0.0,
-            'sum_op_cost': 0.0,
-            'win_pk_cost': 0.0,
-            'win_zero_cost': 0.0,
-            'win_op_cost': 0.0,
-            'summer_date': [],
-            'winter_date': [],
-            's_pks': '',
-            's_pke': '',
-            's_sx': '',
-            's_ops': '',
-            's_ope': '',
-            's_rb': '',
-            'w_pks': '',
-            'w_pke': '',
-            'w_sx': '',
-            'w_ops': '',
-            'w_ope': '',
-            'w_rb': '',
-            'date1_start': '',
-            'date1_end': '',
-            'date2_start': '',
-            'date2_end': '',
-            'fileId': 0,
-            'user_name': '',
-        }
-        for field, default_value in defaults.items():
-            if field not in validated_data:
-                validated_data[field] = default_value
-
-    def validate_category_data(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError("category_data must be a list")
-        for item in value:
-            if not all(k in item for k in ['category', 'specifySplit', 'salesCAGR']):
-                raise serializers.ValidationError(
-                    "Each category_data item must contain 'category', 'specifySplit', and 'salesCAGR'")
-        return value
-
-    def validate_vehicle_category_data(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError(
-                "vehicle_category_data must be a list")
-        required_keys = ['vehicleCategory', 'n', 'f', 'c', 'p', 'e', 'r',
-                         'k', 'l', 'g', 'h', 's', 'u', 'CAGR_V', 'baseElectricityTariff']
-        for item in value:
-            if not all(k in item for k in required_keys):
-                raise serializers.ValidationError(
-                    f"Each vehicle_category_data item must contain all required keys: {required_keys}")
-        return value
-
-    def validate_summer_date(self, value):
-        if not isinstance(value, list) or len(value) != 2:
-            raise serializers.ValidationError(
-                "summer_date must be a list with exactly 2 dates")
-        return value
-
-    def validate_winter_date(self, value):
-        if not isinstance(value, list) or len(value) != 2:
-            raise serializers.ValidationError(
-                "winter_date must be a list with exactly 2 dates")
-        return value
-
-    def _validate_time_format(self, value, field_name):
-        if value and not re.match(r"^\d{2}:\d{2}$", value):
-            raise serializers.ValidationError(
-                f"{field_name} must be in HH:mm format")
-        return value
-
-    def validate_s_pks(self, value):
-        return self._validate_time_format(value, "s_pks")
-
-    def validate_s_pke(self, value):
-        return self._validate_time_format(value, "s_pke")
-
-    def validate_s_ops(self, value):
-        return self._validate_time_format(value, "s_ops")
-
-    def validate_s_ope(self, value):
-        return self._validate_time_format(value, "s_ope")
-
-    def validate_w_pks(self, value):
-        return self._validate_time_format(value, "w_pks")
-
-    def validate_w_pke(self, value):
-        return self._validate_time_format(value, "w_pke")
-
-    def validate_w_ops(self, value):
-        return self._validate_time_format(value, "w_ops")
-
-    def validate_w_ope(self, value):
-        return self._validate_time_format(value, "w_ope")
+        """Update an existing Analysis instance."""
+        category_data = validated_data.pop('category_data', [])
+        vehicle_category_data = validated_data.pop('vehicle_category_data', [])
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        instance.category_data.all().delete()
+        instance.vehicle_category_data.all().delete()
+        for item in category_data:
+            LoadCategoryModel.objects.create(analysis=instance, **item)
+        for item in vehicle_category_data:
+            VehicleCategoryModel.objects.create(analysis=instance, **item)
+        return instance
 
 
 class FilesSerializer(serializers.ModelSerializer):
+    """Serializer for Files."""
     class Meta:
         model = Files
-        fields = ['file', 'id']
+        fields = ['id', 'user', 'file', 'created_at']
 
 
 class UserAnalysisSerializer(serializers.ModelSerializer):
+    """Serializer for UserAnalysis."""
     class Meta:
         model = UserAnalysis
-        fields = ['id', 'userName', 'status', 'errorLog', 'time']
-
-
-class PermanentAnalysisSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = PermanentAnalysis
-        fields = '__all__'
-
-    def create(self, validated_data):
-        request = self.context.get('request')
-        data = request.data
-
-        # Map camelCase keys to snake_case fields
-        validated_data.update({
-            'name': data.get('name', ''),
-            'loadCategory': data.get('loadCategory', 0),
-            'isLoadSplit': data.get('isLoadSplit', ''),
-            'isLoadSplitFile': data.get('isLoadSplitFile', ''),
-            'category_data': data.get('categoryData', []),
-
-            'numOfvehicleCategory': data.get('numOfvehicleCategory', 0),
-            'vehicle_category_data': data.get('vehicleCategoryData', []),
-
-            'resolution': data.get('resolution', 0),
-            'BR_F': data.get('BR_F', ''),
-            'shared_saving': data.get('shared_saving', 0),
-            'sum_pk_cost': data.get('sum_pk_cost', 0),
-            'sum_zero_cost': data.get('sum_zero_cost', 0),
-            'sum_op_cost': data.get('sum_op_cost', 0),
-            'win_pk_cost': data.get('win_pk_cost', 0),
-            'win_zero_cost': data.get('win_zero_cost', 0),
-            'win_op_cost': data.get('win_op_cost', 0),
-
-            'summer_date': data.get('summerDate', []),
-            'winter_date': data.get('winterDate', []),
-            'date1_start': data.get('date1_start', ''),
-            'date1_end': data.get('date1_end', ''),
-            'date2_start': data.get('date2_start', ''),
-            'date2_end': data.get('date2_end', ''),
-
-            's_pks': data.get('s_pks', ''),
-            's_pke': data.get('s_pke', ''),
-            's_ops': data.get('s_ops', ''),
-            's_ope': data.get('s_ope', ''),
-            's_sx': data.get('s_sx', 0),
-            's_rb': data.get('s_rb', 0),
-            'w_pks': data.get('w_pks', ''),
-            'w_pke': data.get('w_pke', ''),
-            'w_ops': data.get('w_ops', ''),
-            'w_ope': data.get('w_ope', ''),
-            'w_sx': data.get('w_sx', 0),
-            'w_rb': data.get('w_rb', 0),
-        })
-
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        data = self.context['request'].data
-
-        # Update fields using camelCase keys from frontend
-        instance.name = data.get('name', instance.name)
-        instance.loadCategory = data.get('loadCategory', instance.loadCategory)
-        instance.isLoadSplit = data.get('isLoadSplit', instance.isLoadSplit)
-        instance.isLoadSplitFile = data.get(
-            'isLoadSplitFile', instance.isLoadSplitFile)
-        instance.category_data = data.get(
-            'categoryData', instance.category_data)
-
-        instance.numOfvehicleCategory = data.get(
-            'numOfvehicleCategory', instance.numOfvehicleCategory)
-        instance.vehicle_category_data = data.get(
-            'vehicleCategoryData', instance.vehicle_category_data)
-
-        instance.resolution = data.get('resolution', instance.resolution)
-        instance.BR_F = data.get('BR_F', instance.BR_F)
-        instance.shared_saving = data.get(
-            'shared_saving', instance.shared_saving)
-        instance.sum_pk_cost = data.get('sum_pk_cost', instance.sum_pk_cost)
-        instance.sum_zero_cost = data.get(
-            'sum_zero_cost', instance.sum_zero_cost)
-        instance.sum_op_cost = data.get('sum_op_cost', instance.sum_op_cost)
-        instance.win_pk_cost = data.get('win_pk_cost', instance.win_pk_cost)
-        instance.win_zero_cost = data.get(
-            'win_zero_cost', instance.win_zero_cost)
-        instance.win_op_cost = data.get('win_op_cost', instance.win_op_cost)
-
-        instance.summer_date = data.get('summerDate', instance.summer_date)
-        instance.winter_date = data.get('winterDate', instance.winter_date)
-        instance.date1_start = data.get('date1_start', instance.date1_start)
-        instance.date1_end = data.get('date1_end', instance.date1_end)
-        instance.date2_start = data.get('date2_start', instance.date2_start)
-        instance.date2_end = data.get('date2_end', instance.date2_end)
-
-        instance.s_pks = data.get('s_pks', instance.s_pks)
-        instance.s_pke = data.get('s_pke', instance.s_pke)
-        instance.s_ops = data.get('s_ops', instance.s_ops)
-        instance.s_ope = data.get('s_ope', instance.s_ope)
-        instance.s_sx = data.get('s_sx', instance.s_sx)
-        instance.s_rb = data.get('s_rb', instance.s_rb)
-        instance.w_pks = data.get('w_pks', instance.w_pks)
-        instance.w_pke = data.get('w_pke', instance.w_pke)
-        instance.w_ops = data.get('w_ops', instance.w_ops)
-        instance.w_ope = data.get('w_ope', instance.w_ope)
-        instance.w_sx = data.get('w_sx', instance.w_sx)
-        instance.w_rb = data.get('w_rb', instance.w_rb)
-
-        instance.save()
-        return instance
+        fields = ['id', 'user', 'analysis', 'created_at']

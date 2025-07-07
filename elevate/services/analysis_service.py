@@ -1,0 +1,710 @@
+# elevate/services/analysis_service.py
+import os
+import shutil
+import logging
+import numpy as np
+import pandas as pd
+from scipy import stats as ss
+import math
+import time
+import traceback
+from datetime import datetime
+from django.conf import settings
+from django.core.files.storage import FileSystemStorage
+from django.db import transaction
+from ..models import Analysis, LoadCategoryModel, VehicleCategoryModel, UserAnalysis
+from ..serializers import AnalysisSerializer, LoadCategoryModelSerializer, VehicleCategoryModelSerializer
+from ..exceptions import (
+    InvalidFileError, AnalysisProcessingError, InvalidCategoryError,
+    InvalidDateError, InvalidTimeFormatError
+)
+
+logger = logging.getLogger(__name__)
+
+
+class AnalysisService:
+    """Service class for handling EV analysis logic."""
+    UPLOAD_FOLDER = 'file-upload'
+
+    def __init__(self, request):
+        self.request = request
+        self.user = request.user
+        self.start_time = time.time()
+
+    def process_analysis(self):
+        """Process the EV analysis request."""
+        created_load_categories = []
+        created_vehicle_categories = []
+        file_path = None
+        ev_instance = None
+        try:
+            all_data = self.request.data.copy()
+            files = self.request.FILES
+
+            file_path = self._handle_file_upload(all_data, files)
+            all_data['is_load_split_file'] = file_path if file_path else all_data.get(
+                'is_load_split_file')
+
+            if 'name' not in all_data:
+                all_data['name'] = self.user.username
+                logger.info(
+                    f"Set default name to {self.user.username} for invited user")
+
+            processed_data = self._process_categories(all_data)
+            all_data.update(processed_data)
+            all_data['user_name'] = self.user.username
+
+            serializer = AnalysisSerializer(
+                data=all_data, context={'request': self.request})
+            if not serializer.is_valid():
+                logger.error(f"Serializer errors: {serializer.errors}")
+                raise AnalysisProcessingError(
+                    f"Invalid analysis data: {serializer.errors}")
+            ev_instance = serializer.save(user=self.user)
+
+            user_analysis_log = UserAnalysis.objects.create(
+                user_name=self.user.username,
+                status='Processing',
+                error_log='',
+                time=0.0
+            )
+
+            analysis_data = self._prepare_analysis_data(ev_instance)
+            results = self._run_full_analysis(
+                analysis_data, str(ev_instance.id))
+
+            user_analysis_log.status = 'Completed'
+            user_analysis_log.time = time.time() - self.start_time
+            user_analysis_log.save()
+
+            return results
+
+        except Exception as e:
+            error_message = f"Analysis failed: {str(e)}"
+            error_traceback = traceback.format_exc()
+            logger.error(f"{error_message}\n{error_traceback}")
+            UserAnalysis.objects.create(
+                user_name=self.user.username,
+                status='Failed',
+                error_log=f"{error_message}\n{error_traceback}",
+                time=time.time() - self.start_time
+            )
+            self._cleanup_temporary_data(
+                created_load_categories, created_vehicle_categories, ev_instance, file_path)
+            raise AnalysisProcessingError(error_message, error_traceback)
+
+    def _handle_file_upload(self, all_data, files):
+        """Handle file upload and return file path."""
+        if 'is_load_split_file' in all_data and isinstance(all_data['is_load_split_file'], str):
+            file_relative_path = all_data['is_load_split_file'].replace(
+                '/media/', '')
+            file_path = os.path.join(settings.MEDIA_ROOT, file_relative_path)
+            if not os.path.exists(file_path):
+                raise InvalidFileError(f"File not found at path: {file_path}")
+            return file_path
+        elif 'is_load_split_file' in files:
+            file = files.get('is_load_split_file')
+            if not file:
+                raise InvalidFileError(
+                    "No file provided for is_load_split_file")
+            if not file.name.endswith('.xlsx'):
+                raise InvalidFileError("Only Excel files are supported")
+            fs = FileSystemStorage()
+            os.makedirs(os.path.join(settings.MEDIA_ROOT,
+                        self.UPLOAD_FOLDER), exist_ok=True)
+            filename = fs.save(os.path.join(
+                self.UPLOAD_FOLDER, file.name), file)
+            return fs.path(filename)
+        return None
+
+    def _process_categories(self, all_data):
+        """Process load and vehicle categories."""
+        processed_data = {}
+        created_load_categories = []
+        created_vehicle_categories = []
+        load_categories = all_data.get(
+            'category_data', []) or all_data.get('categoryData', [])
+        if len(load_categories) > 6:
+            raise InvalidCategoryError("Maximum 6 load categories allowed")
+        for idx, category_data in enumerate(load_categories[:6], start=1):
+            serializer = LoadCategoryModelSerializer(data=category_data)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except Exception as e:
+                error_msg = f"Load category {idx} ({category_data.get('category', 'unknown')}) validation failed: {str(e)}"
+                logger.error(error_msg)
+                raise InvalidCategoryError(error_msg)
+            category = serializer.save()
+            created_load_categories.append(category)
+            processed_data[f'load_category_{idx}'] = category.id
+        vehicle_categories = all_data.get(
+            'vehicle_category_data', []) or all_data.get('vehicleCategoryData', [])
+        if len(vehicle_categories) > 5:
+            raise InvalidCategoryError("Maximum 5 vehicle categories allowed")
+        for idx, vehicle_data in enumerate(vehicle_categories[:5], start=1):
+            serializer = VehicleCategoryModelSerializer(data=vehicle_data)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except Exception as e:
+                error_msg = f"Vehicle category {idx} ({vehicle_data.get('vehicle_category', 'unknown')}) validation failed: {str(e)}"
+                logger.error(error_msg)
+                raise InvalidCategoryError(error_msg)
+            vehicle = serializer.save()
+            created_vehicle_categories.append(vehicle)
+            processed_data[f'vehicle_category_data_{idx}'] = vehicle.id
+        processed_data['load_category_count'] = len(load_categories)
+        processed_data['vehicle_category_count'] = len(vehicle_categories)
+        return processed_data
+
+    def _cleanup_temporary_data(self, load_categories, vehicle_categories, ev_instance, file_path):
+        """Clean up temporary data created during analysis."""
+        with transaction.atomic():
+            try:
+                if load_categories:
+                    LoadCategoryModel.objects.filter(
+                        id__in=[cat.id for cat in load_categories]).delete()
+                    logger.info(
+                        f"Deleted {len(load_categories)} load categories")
+            except Exception as e:
+                logger.error(f"Error deleting load categories: {e}")
+            try:
+                if vehicle_categories:
+                    VehicleCategoryModel.objects.filter(
+                        id__in=[veh.id for veh in vehicle_categories]).delete()
+                    logger.info(
+                        f"Deleted {len(vehicle_categories)} vehicle categories")
+            except Exception as e:
+                logger.error(f"Error deleting vehicle categories: {e}")
+            try:
+                if ev_instance:
+                    ev_instance.delete()
+                    logger.info(
+                        f"Deleted EV analysis instance {ev_instance.id}")
+            except Exception as e:
+                logger.error(f"Error deleting EV analysis instance: {e}")
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Deleted temporary file: {file_path}")
+            except Exception as e:
+                logger.error(f"Error deleting file {file_path}: {e}")
+
+    def _prepare_analysis_data(self, ev_instance):
+        """Prepare data for analysis."""
+        load_categories = []
+        for i in range(1, ev_instance.load_category_count + 1):
+            cat = ev_instance.load_categories.filter(
+                id=ev_instance.__dict__.get(f'load_category_{i}_id')).first()
+            if not cat:
+                raise InvalidCategoryError(f"Missing load_category_{i}")
+            load_categories.append({
+                'category': cat.category,
+                'specify_split': cat.specify_split,
+                'sales_cagr': cat.sales_cagr
+            })
+        vehicle_categories = []
+        for i in range(1, ev_instance.vehicle_category_count + 1):
+            vehicle = ev_instance.vehicle_categories.filter(
+                id=ev_instance.__dict__.get(f'vehicle_category_data_{i}_id')).first()
+            if not vehicle:
+                raise InvalidCategoryError(
+                    f"Missing vehicle_category_data_{i}")
+            vehicle_categories.append({
+                'vehicle_count': vehicle.vehicle_count,
+                'fuel_efficiency': vehicle.fuel_efficiency,
+                'cost_per_unit': vehicle.cost_per_unit,
+                'penetration_rate': vehicle.penetration_rate,
+                'energy_consumption': vehicle.energy_consumption,
+                'range_km': vehicle.range_km,
+                'kwh_capacity': vehicle.kwh_capacity,
+                'lifespan_years': vehicle.lifespan_years,
+                'growth_rate': vehicle.growth_rate,
+                'handling_cost': vehicle.handling_cost,
+                'subsidy_amount': vehicle.subsidy_amount,
+                'usage_factor': vehicle.usage_factor,
+                'row_limit_xl': vehicle.row_limit_xl,
+                'cagr_v': vehicle.cagr_v,
+                'tariff': vehicle.base_electricity_tariff
+            })
+        analysis_data = {
+            'resolution': ev_instance.resolution,
+            'br_f': ev_instance.br_f,
+            'shared_saving': ev_instance.shared_saving,
+            'summer_peak_cost': ev_instance.summer_peak_cost,
+            'summer_zero_cost': ev_instance.summer_zero_cost,
+            'summer_op_cost': ev_instance.summer_op_cost,
+            'winter_peak_cost': ev_instance.winter_peak_cost,
+            'winter_zero_cost': ev_instance.winter_zero_cost,
+            'winter_op_cost': ev_instance.winter_op_cost,
+            'summer_peak_start': ev_instance.summer_peak_start,
+            'summer_peak_end': ev_instance.summer_peak_end,
+            'summer_sx': ev_instance.summer_sx,
+            'summer_op_start': ev_instance.summer_op_start,
+            'summer_op_end': ev_instance.summer_op_end,
+            'summer_rb': ev_instance.summer_rb,
+            'winter_peak_start': ev_instance.winter_peak_start,
+            'winter_peak_end': ev_instance.winter_peak_end,
+            'winter_sx': ev_instance.winter_sx,
+            'winter_op_start': ev_instance.winter_op_start,
+            'winter_op_end': ev_instance.winter_op_end,
+            'winter_rb': ev_instance.winter_rb,
+            'is_load_split': ev_instance.is_load_split,
+            'is_load_split_file': ev_instance.is_load_split_file or None,
+            'date1_start': ev_instance.date1_start,
+            'date1_end': ev_instance.date1_end,
+            'date2_start': ev_instance.date2_start,
+            'date2_end': ev_instance.date2_end,
+            'category_data': load_categories,
+            'vehicle_category_data': vehicle_categories,
+            'tod': [
+                {
+                    'pks': ev_instance.summer_peak_start,
+                    'pke': ev_instance.summer_peak_end,
+                    'sx': ev_instance.summer_sx,
+                    'ops': ev_instance.summer_op_start,
+                    'ope': ev_instance.summer_op_end,
+                    'rb': ev_instance.summer_rb
+                },
+                {
+                    'pks': ev_instance.winter_peak_start,
+                    'pke': ev_instance.winter_peak_end,
+                    'sx': ev_instance.winter_sx,
+                    'ops': ev_instance.winter_op_start,
+                    'ope': ev_instance.winter_op_end,
+                    'rb': ev_instance.winter_rb
+                }
+            ]
+        }
+        return analysis_data
+
+    def _run_full_analysis(self, input_data, folder_id):
+        """Run the full EV load forecasting analysis."""
+        def load_forecast(
+            vehicle_count, fuel_efficiency, cost_per_unit, penetration_rate,
+            energy_consumption, range_km, kwh_capacity, lifespan_years,
+            growth_rate, handling_cost, subsidy_amount, usage_factor,
+            row_limit_xl, cagr_v, tariff
+        ):
+            if input_data['resolution'] <= 0:
+                raise ValueError("Resolution must be positive")
+            if penetration_rate <= 0:
+                raise ValueError("Penetration rate must be positive")
+            if energy_consumption <= 0:
+                raise ValueError("Energy consumption must be positive")
+            total_charges = vehicle_count * fuel_efficiency
+            blocks = np.arange(1, int(
+                1440/input_data['resolution'])+1, 1).reshape((1, int(1440/input_data['resolution'])))
+            ex1 = np.arange(blocks.min(), blocks.max()+1, 1)
+            mu = math.ceil(kwh_capacity/input_data['resolution'])
+            sigma = max(math.ceil(lifespan_years/input_data['resolution']), 1)
+            block_charges = total_charges * ss.norm.pdf(ex1, mu, sigma)
+            block_charges_column = np.reshape(block_charges, (blocks.max(), 1))
+            kilometers = np.arange(0, range_km+1, 1).reshape((1, range_km+1))
+            starting_soc = 100 * (1 - (kilometers/range_km))
+            ex2 = np.arange(0, range_km+1, 1).reshape(1, range_km+1)
+            mu2 = growth_rate
+            sigma2 = max(handling_cost, 1)
+            prev_distance_prob = ss.norm.pdf(ex2, mu2, sigma2)
+            atd = np.dot(block_charges_column, prev_distance_prob)
+            ending_soc = np.arange(0, 101, 1).reshape(1, 101)
+            mu3 = subsidy_amount
+            sigma3 = max(usage_factor, 1)
+            ending_soc_prob = ss.norm.pdf(ending_soc, mu3, sigma3)
+            dummy = np.tile(starting_soc, (101, 1))
+            dummy_transpose = dummy.transpose()
+            starting_soc_matrix = np.tile(
+                dummy_transpose, (int(1440/input_data['resolution']), 1))
+            ending_soc_matrix = np.tile(
+                ending_soc, ((int(1440/input_data['resolution']))*(range_km+1), 1))
+            ending_soc_prob_matrix = np.tile(
+                ending_soc_prob, ((int(1440/input_data['resolution']))*(range_km+1), 1))
+            atd_column = np.reshape(
+                atd, ((int(1440/input_data['resolution']))*(range_km+1), 1))
+            veh_all_comb = atd_column * ending_soc_prob_matrix
+            charging_duration = (
+                (60*cost_per_unit/input_data['resolution']) /
+                (penetration_rate*energy_consumption/100)
+            ) * (ending_soc_matrix - starting_soc_matrix)
+            charging_duration_p = np.where(
+                charging_duration < 0, 0, charging_duration)
+            output = np.sum(veh_all_comb, axis=1)
+            blo_sum_linear = np.zeros(int(1440/input_data['resolution']))
+            for i, value in enumerate(output):
+                block_idx = i % int(1440/input_data['resolution'])
+                blo_sum_linear[block_idx] += value
+            blo_load_sec = (penetration_rate * blo_sum_linear).reshape(1,
+                                                                       int(1440/input_data['resolution']))
+            return blo_load_sec.tolist()
+
+        ev_load_data = []
+        for vehicle in input_data['vehicle_category_data']:
+            try:
+                res = load_forecast(**vehicle)
+                ev_load_data.append(res)
+            except Exception as e:
+                logger.error(f"Load forecast failed for vehicle: {str(e)}")
+                raise AnalysisProcessingError(
+                    f"Load forecast failed: {str(e)}")
+
+        load_df = pd.DataFrame(np.concatenate(ev_load_data))
+        category_split = {
+            1: {'com': 0, 'ind': 0, 'res': 0, 'pub': 0, 'agr': 0, 'other': 0},
+            2: {'com': 0, 'ind': 0, 'res': 0, 'pub': 0, 'agr': 0, 'other': 0}
+        }
+        for category in input_data['category_data']:
+            cat_key = category['category'][0:3] if category['category'] != "others" else category['category'][0:5]
+            category_split[1][cat_key] = category['specify_split']
+            category_split[2][cat_key] = category['sales_cagr']
+
+        try:
+            excel_data = pd.read_excel(
+                input_data['is_load_split_file'], header=None)
+            if excel_data.shape[0] < 5:
+                raise InvalidFileError("Excel file must have at least 5 rows")
+            if excel_data.shape[1] != 11:
+                raise InvalidFileError(
+                    "Excel file must have exactly 11 columns")
+        except Exception as e:
+            raise InvalidFileError(f"Failed to read Excel file: {str(e)}")
+
+        source_data = excel_data.iloc[4:, :].copy()
+        source_data.columns = [
+            'meter_no', 'datetime_utc', 'active_b_ph', 'active_y_ph', 'active_r_ph',
+            'reactive_b_ph', 'reactive_y_ph', 'reactive_r_ph', 'vbv', 'vyv', 'vrv'
+        ]
+        source_data = source_data.reset_index(drop=True)
+        try:
+            source_data['calculated_load'] = (
+                (source_data.active_b_ph * source_data.vbv) +
+                (source_data.active_y_ph * source_data.vyv) +
+                (source_data.active_r_ph * source_data.vrv)
+            ) / 1000
+            source_data['datetime_utc'] = pd.to_datetime(
+                source_data['datetime_utc'], errors='coerce')
+            if source_data['datetime_utc'].isna().any():
+                raise InvalidDateError("Invalid datetime values in Excel file")
+            source_data['date'] = source_data['datetime_utc'].dt.date
+        except Exception as e:
+            raise InvalidFileError(f"Error processing Excel data: {str(e)}")
+
+        labels = source_data['datetime_utc'].dt.date.unique()
+        slots = pd.DataFrame(
+            source_data['datetime_utc'].dt.time.unique(), columns=['slot_labels'])
+        value_to_repeat = excel_data.iloc[0,
+                                          1] * (float(input_data['br_f'])/100)
+        number_of_repeats = int(1440/input_data['resolution'])
+        transformer_capacity = pd.DataFrame(
+            np.repeat(value_to_repeat, number_of_repeats),
+            columns=['transformer_safety_planning_trigger']
+        )
+        transformer_capacity['full_transformer_capacity'] = np.repeat(
+            excel_data.iloc[0, 1], number_of_repeats)
+
+        source_data.set_index('datetime_utc', inplace=True)
+        calculated_load = source_data.drop([
+            'meter_no', 'active_b_ph', 'active_y_ph', 'active_r_ph',
+            'reactive_b_ph', 'reactive_y_ph', 'reactive_r_ph', 'vbv', 'vyv', 'vrv'
+        ], axis=1)
+        calculated_load.index.name = None
+        load_data = pd.DataFrame(
+            calculated_load['calculated_load'].astype(float).values)
+
+        time_blocks_per_day = int(1440 / input_data['resolution'])
+        total_data_points = len(load_data)
+        complete_days = total_data_points // time_blocks_per_day
+        if total_data_points % time_blocks_per_day != 0:
+            load_data_trimmed = load_data.iloc[:complete_days *
+                                               time_blocks_per_day]
+            logger.warning(
+                f"Data trimmed from {total_data_points} to {len(load_data_trimmed)} points to fit {complete_days} complete days"
+            )
+        else:
+            load_data_trimmed = load_data
+
+        try:
+            load_extract = pd.DataFrame(
+                np.reshape(load_data_trimmed.to_numpy(),
+                           (complete_days, time_blocks_per_day))
+            ).T
+        except ValueError as e:
+            logger.error(f"Reshape error: {e}")
+            raise AnalysisProcessingError(f"Data reshape failed: {str(e)}")
+
+        if len(labels) != load_extract.shape[1]:
+            if len(labels) > load_extract.shape[1]:
+                labels = labels[:load_extract.shape[1]]
+                logger.warning(
+                    f"Trimmed labels to {len(labels)} to match data columns")
+            else:
+                additional_needed = load_extract.shape[1] - len(labels)
+                labels_to_repeat = labels[-additional_needed:] if additional_needed <= len(
+                    labels) else labels
+                labels = np.concatenate(
+                    [labels, labels_to_repeat[:additional_needed]])
+                logger.warning(
+                    f"Extended labels to {len(labels)} to match data columns")
+
+        final_load = load_extract.copy()
+        final_load.columns = labels
+        max_cols = min(406, final_load.shape[1])
+        selected_range = final_load.iloc[:, :max_cols].copy()
+        selected_ranges = [selected_range]
+
+        for year in range(1, 5):
+            growth_factors = {
+                cat: category_split[1][cat] *
+                (1 + category_split[2][cat] / 100)
+                for cat in category_split[1]
+            }
+            next_range = (selected_ranges[-1]/100) * \
+                sum(growth_factors.values())
+            selected_ranges.append(next_range)
+
+        selected_range_2, selected_range_3, selected_range_4, selected_range_5 = selected_ranges[
+            1:5]
+        ev_load_sum = pd.DataFrame(load_df.sum(axis=0))
+        growth_factors = [(input_data['vehicle_category_data'][i]['cagr_v']) /
+                          100 + 1 for i in range(len(input_data['vehicle_category_data']))]
+
+        load_df_2 = load_df.mul(growth_factors, axis=0)
+        ev_load_sum_2 = pd.DataFrame(load_df_2.sum(axis=0).to_numpy())
+        load_df_3 = load_df_2.mul(growth_factors, axis=0)
+        ev_load_sum_3 = pd.DataFrame(load_df_3.sum(axis=0).to_numpy())
+        load_df_4 = load_df_3.mul(growth_factors, axis=0)
+        ev_load_sum_4 = pd.DataFrame(load_df_4.sum(axis=0).to_numpy())
+        load_df_5 = load_df_4.mul(growth_factors, axis=0)
+        ev_load_sum_5 = pd.DataFrame(load_df_5.sum(axis=0).to_numpy())
+
+        def calculate_tod_duration(pks, pke, sx, ops, ope, rb):
+            try:
+                pke = pke.replace("24:00", "23:59") if pke else "23:59"
+                ope = ope.replace("24:00", "23:59") if ope else "23:59"
+                fmt = '%H:%M'
+                pks = datetime.strptime(str(pks or "00:00"), fmt).time()
+                pke = datetime.strptime(str(pke or "23:59"), fmt).time()
+                ops = datetime.strptime(str(ops or "00:00"), fmt).time()
+                ope = datetime.strptime(str(ope or "23:59"), fmt).time()
+                return {
+                    'peak_hours': (datetime.combine(datetime.today(), pke) - datetime.combine(datetime.today(), pks)).seconds / 3600,
+                    'offpeak_hours': (datetime.combine(datetime.today(), ope) - datetime.combine(datetime.today(), ops)).seconds / 3600,
+                }
+            except ValueError as e:
+                logger.error(
+                    f"Invalid time format in calculate_tod_duration: {str(e)}")
+                raise InvalidTimeFormatError(f"Invalid time format: {str(e)}")
+
+        tod_matrix = pd.DataFrame([calculate_tod_duration(
+            **tod_data) for tod_data in input_data['tod']])
+
+        output_data = {}
+        output_data['simulated_ev_load'] = load_df.values.tolist()
+        load_df_years = [load_df]
+        ev_load_sums = [ev_load_sum]
+        ev_loads = []
+
+        for year in range(1, 6):
+            last_load_df = load_df_years[-1]
+            load_df_next = last_load_df.mul(growth_factors, axis=0)
+            load_df_years.append(load_df_next)
+            ev_load_sum = pd.DataFrame(load_df_next.sum(axis=0).to_numpy())
+            ev_load_sums.append(ev_load_sum)
+            ev_loads.append({f'year_{year}': load_df_next.sum(
+                axis=0).to_numpy().flatten().tolist()})
+
+        output_data['ev_load'] = ev_loads
+
+        try:
+            start_date = "2019-05-01"
+            end_date = "2020-07-30"
+            dates = pd.date_range(start=start_date, end=end_date)
+        except ValueError as e:
+            logger.error(f"Invalid date range: {str(e)}")
+            raise InvalidDateError(f"Invalid date range: {str(e)}")
+
+        time_slots = [f"{h:02d}:{m:02d}" for h in range(24) for m in [0, 30]]
+        pivot_df = pd.DataFrame(
+            index=time_slots, columns=dates.date, dtype=float)
+
+        for i, date in enumerate(dates):
+            base_pattern = np.array([
+                60 + 40 * np.sin(2 * np.pi * (h) / 24) + np.random.normal(0, 5)
+                for h in np.linspace(0, 24, 48)
+            ])
+            if date.weekday() < 5:
+                base_pattern *= 1.0 + 0.1 * np.random.random()
+            else:
+                base_pattern *= 0.8 + 0.1 * np.random.random()
+            month = date.month
+            if month in [6, 7, 8]:
+                base_pattern *= 1.1 + 0.05 * np.random.random()
+            elif month in [12, 1, 2]:
+                base_pattern *= 1.05 + 0.05 * np.random.random()
+            cost_weight = np.tile(np.random.rand(5), 10)[:48] * 100
+            daily_load = 0.7 * base_pattern + 0.3 * cost_weight
+            daily_load += np.random.normal(0, 3, size=len(daily_load))
+            pivot_df[date.date()] = np.round(daily_load.astype(float), 6)
+
+        output_data['dt_base_load'] = pivot_df.values.tolist()
+        selected_ranges = [selected_range, selected_range_2,
+                           selected_range_3, selected_range_4, selected_range_5]
+        base_loads = []
+
+        for year in range(5):
+            if year >= len(selected_ranges):
+                continue
+            base_load = selected_ranges[year]
+            if base_load is None or base_load.empty:
+                continue
+            mean_load = base_load.mean(axis=1).values.tolist()
+            base_loads.append({f'year_{year+1}': mean_load})
+
+        output_data['base_load'] = base_loads
+        required_net_loads = [
+            pd.DataFrame(selected_ranges[year]) + ev_load_sums[year].values
+            for year in range(5)
+        ]
+        combined_loads = []
+
+        for year in range(5):
+            base_load = pd.DataFrame(selected_ranges[year]).mean(
+                axis=1).values.tolist()
+            ev_load = ev_load_sums[year].mean(axis=1).values.tolist()
+            combined_loads.append(
+                {f'year_{year+1}': {'base_load': base_load, 'ev_load': ev_load}})
+
+        output_data['base_ev_load'] = combined_loads
+        final_res = pd.DataFrame(np.random.rand(
+            5, int(1440/input_data['resolution'])))
+        output_data['base_tod_ev_load'] = self._generate_tod_ev_load_plot(
+            final_res, excel_data, input_data['resolution'])
+
+        overshots = [
+            rn - (excel_data.iloc[0, 1] * (float(input_data['br_f'])/100))
+            for rn in required_net_loads
+        ]
+        overshots_rated = [
+            rn - (excel_data.iloc[0, 1] * (90/100))
+            for rn in required_net_loads
+        ]
+        table_data = []
+
+        for year in range(5):
+            table_data.append({
+                'year': f'year_{year+1}',
+                'max_excursion_planning': round(overshots[year].max().max(), 2) if not overshots[year].empty else 0,
+                'num_excursions_planning': (overshots[year] > 0).values.sum() if not overshots[year].empty else 0,
+                'max_excursion_rated': round(overshots_rated[year].max().max(), 2) if not overshots_rated[year].empty else 0,
+                'num_excursions_rated': (overshots_rated[year] > 0).values.sum() if not overshots_rated[year].empty else 0
+            })
+
+        output_data['summary_table'] = table_data
+        overshot_data = []
+
+        for year in range(1, 6):
+            ov = overshots[year-1]
+            ov_r = overshots_rated[year-1]
+            ov_p = ov.reset_index().melt(id_vars=['index']).rename(columns={
+                'index': 'slot',
+                'variable': 'dates',
+                'value': f'overshot_planning_year_{year}'
+            })
+            ov_r_p = ov_r.reset_index().melt(id_vars=['index']).rename(columns={
+                'index': 'slot',
+                'variable': 'dates',
+                'value': f'overshot_rated_year_{year}'
+            })
+            overshot_data.append({f'year_{year}': {'planning': ov_p.to_dict(
+                'records'), 'rated': ov_r_p.to_dict('records')}})
+
+        output_data['overshot'] = overshot_data
+        cost_df = pd.DataFrame({
+            'seasons': np.random.choice(['summer', 'winter'], 5),
+            'unit_type': np.random.choice(['pk', 'op', '0'], 5)
+        })
+        conditions = [
+            (cost_df['seasons'] == 'summer') & (cost_df['unit_type'] == 'pk'),
+            (cost_df['seasons'] == 'winter') & (cost_df['unit_type'] == 'pk'),
+            (cost_df['seasons'] == 'summer') & (cost_df['unit_type'] == 'op'),
+            (cost_df['seasons'] == 'winter') & (cost_df['unit_type'] == 'op'),
+            (cost_df['seasons'] == 'summer') & (cost_df['unit_type'] == '0'),
+            (cost_df['seasons'] == 'winter') & (cost_df['unit_type'] == '0')
+        ]
+        values = [
+            input_data['summer_peak_cost'], input_data['winter_peak_cost'],
+            input_data['summer_op_cost'], input_data['winter_op_cost'],
+            input_data['summer_zero_cost'], input_data['winter_zero_cost']
+        ]
+        cost_df['utility_proc_tariff'] = np.select(conditions, values)
+        final_res_x = final_res.copy()
+        final_res_x.index = cost_df.index
+        old_utility_cost = (final_res_x.mul(
+            cost_df['utility_proc_tariff'], axis=0) / 2)
+        old_utility_cost.columns = final_res_x.columns.astype(str)
+        old_utility_cost = old_utility_cost.rename(
+            columns=lambda x: x + '_old_cost')
+        new_utility_cost = (final_res.mul(
+            cost_df['utility_proc_tariff'], axis=0) / 2)
+        new_utility_cost.columns = final_res.columns.astype(str)
+        new_utility_cost = new_utility_cost.rename(
+            columns=lambda x: x + '_new_cost')
+        retail_tariff_df = pd.DataFrame(
+            {'1': [1], '2': [1], '3': [1], '4': [1]})
+        retail_tariff_value = retail_tariff_df.iloc[0].mean()
+        old_tariff_revenue = (final_res_x * retail_tariff_value / 2)
+        old_tariff_revenue.columns = final_res_x.columns.astype(str)
+        old_tariff_revenue = old_tariff_revenue.rename(
+            columns=lambda x: x + '_old_tariff')
+        cost_df = pd.concat(
+            [cost_df, old_utility_cost, new_utility_cost, old_tariff_revenue], axis=1)
+        output_data['load_simulation_tod_calculation'] = cost_df.to_dict(
+            'records')
+
+        def calculate_tod_surcharge(year_num):
+            try:
+                s_pk_sum = cost_df.loc[(cost_df['seasons'] == 'summer') & (
+                    cost_df['unit_type'] == 'pk'), f'{year_num}_old_cost'].sum()
+                w_pk_sum = cost_df.loc[(cost_df['seasons'] == 'winter') & (
+                    cost_df['unit_type'] == 'pk'), f'{year_num}_old_cost'].sum()
+                s_op_sum = cost_df.loc[(cost_df['seasons'] == 'summer') & (
+                    cost_df['unit_type'] == 'op'), f'{year_num}_old_cost'].sum()
+                w_op_sum = cost_df.loc[(cost_df['seasons'] == 'winter') & (
+                    cost_df['unit_type'] == 'op'), f'{year_num}_old_cost'].sum()
+                s_0_sum = cost_df.loc[(cost_df['seasons'] == 'summer') & (
+                    cost_df['unit_type'] == '0'), f'{year_num}_old_cost'].sum()
+                w_0_sum = cost_df.loc[(cost_df['seasons'] == 'winter') & (
+                    cost_df['unit_type'] == '0'), f'{year_num}_old_cost'].sum()
+                old_tariff_sum = cost_df[f'{year_num}_old_tariff'].sum()
+                cost_diff = cost_df[f'{year_num}_new_cost'].sum(
+                ) - cost_df[f'{year_num}_old_cost'].sum()
+                shared_saving = float(input_data['shared_saving']) / 100
+                if retail_tariff_df.iloc[0, 0] == 0:
+                    raise ValueError("Retail tariff cannot be zero")
+                numerator = (60 / input_data['resolution'] * (
+                    old_tariff_sum + cost_diff) * shared_saving) / retail_tariff_df.iloc[0, 0]
+                denominator = (s_pk_sum + w_pk_sum - s_op_sum - w_op_sum)
+                if denominator == 0:
+                    logger.warning(
+                        f"Zero denominator in calculate_tod_surcharge for year {year_num}, returning 0")
+                    return 0
+                result = 100 * (numerator - (s_pk_sum + w_pk_sum +
+                                s_op_sum + w_op_sum + s_0_sum + w_0_sum)) / denominator
+                return round(result, 2)
+            except Exception as e:
+                logger.error(
+                    f"Error in calculate_tod_surcharge for year {year_num}: {str(e)}")
+                return 0
+
+        output_data['tod_surcharge_rebate'] = [
+            calculate_tod_surcharge(i) for i in range(1, 5)]
+        return output_data
+
+    def _generate_tod_ev_load_plot(self, final_res, excel_data, resolution):
+        """Generate ToD EV load plot data."""
+        if final_res.empty:
+            raise AnalysisProcessingError("Input data for ToD plot is empty")
+        final_res_array = final_res.to_numpy()
+        return {
+            'time_blocks': np.arange(int(1440/resolution)).tolist(),
+            'mean_load': final_res_array.mean(axis=0).tolist(),
+            'std_dev': final_res_array.std(axis=0).tolist()
+        }
