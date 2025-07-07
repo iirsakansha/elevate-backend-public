@@ -493,11 +493,21 @@ class PermanentAnalysis(BaseAnalysisModel):
 
 class Files(models.Model):
     """Model for storing uploaded files."""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="uploaded_files",
+        verbose_name="user",
+    )
     file = models.FileField(
         upload_to="file_upload/",
         blank=False,
         null=False,
         verbose_name="file",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="created at",
     )
 
     class Meta:
@@ -517,8 +527,7 @@ class Files(models.Model):
             logger.error(f"Error deleting file {self.file.name}: {str(e)}")
 
     def __str__(self):
-        return f"File {self.id}"
-
+        return f"File {self.id} uploaded by {self.user.username}"
 
 class UserAnalysis(models.Model):
     """Model for logging user analysis activities."""

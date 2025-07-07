@@ -399,13 +399,13 @@ class FileUploadAPI(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        file_serializer = FilesSerializer(data=request.data)
+        file_serializer = FilesSerializer(
+            data=request.data, context={'request': request})
         if file_serializer.is_valid():
             file_serializer.save()
             return Response(file_serializer.data, status=status.HTTP_201_CREATED)
         return Response(file_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
+    
 class DeleteDataAPI(APIView):
     """API to delete analysis data and associated files."""
     permission_classes = [permissions.IsAuthenticated]
