@@ -1,3 +1,4 @@
+from venv import logger
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
@@ -340,7 +341,7 @@ class AnalysisSerializer(serializers.ModelSerializer):
     class Meta:
         model = Analysis
         fields = [
-            'id', 'user', 'name', 'load_category_count', 'load_split_file',
+            'id', 'user', 'name', 'load_category_count', 'is_load_split_file',
             'category_data', 'vehicle_category_count', 'vehicle_category_data',
             'resolution', 'br_f', 'shared_saving', 'summer_peak_cost',
             'summer_zero_cost', 'summer_op_cost', 'winter_peak_cost',
@@ -382,10 +383,14 @@ class AnalysisSerializer(serializers.ModelSerializer):
                 "vehicle_category_count must be between 1 and 5"
             )
 
-        if data.get('is_load_split') == 'yes' and not data.get('load_split_file'):
+        if data.get('is_load_split') == 'yes' and not data.get('is_load_split_file'):
             raise serializers.ValidationError(
-                "load_split_file is required when is_load_split is 'yes'"
+                "is_load_split_file is required when is_load_split is 'yes'"
             )
+        if data.get('is_load_split') == 'no' and data.get('is_load_split_file'):
+            logger.warning(
+                "is_load_split_file provided but is_load_split is 'no'; ignoring file")
+            data['is_load_split_file'] = None
 
         numeric_fields = [
             'resolution', 'shared_saving', 'summer_peak_cost', 'summer_zero_cost',
@@ -438,51 +443,6 @@ class AnalysisSerializer(serializers.ModelSerializer):
 
         return data
 
-    def create(self, validated_data):
-        """Create a new Analysis instance."""
-        category_data = validated_data.pop('category_data', [])
-        vehicle_category_data = validated_data.pop('vehicle_category_data', [])
-
-        # Create the Analysis instance
-        instance = Analysis.objects.create(**validated_data)
-
-        # Create and link LoadCategoryModel instances
-        for item in category_data:
-            load_category = LoadCategoryModel.objects.create(**item)
-            instance.load_categories.add(load_category)
-
-        # Create and link VehicleCategoryModel instances
-        for item in vehicle_category_data:
-            vehicle_category = VehicleCategoryModel.objects.create(**item)
-            instance.vehicle_categories.add(vehicle_category)
-
-        return instance
-
-    def update(self, instance, validated_data):
-        """Update an existing Analysis instance."""
-        category_data = validated_data.pop('category_data', [])
-        vehicle_category_data = validated_data.pop('vehicle_category_data', [])
-
-        # Update the Analysis instance
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        # Clear existing relationships
-        instance.load_categories.clear()
-        instance.vehicle_categories.clear()
-
-        # Create and link new LoadCategoryModel instances
-        for item in category_data:
-            load_category = LoadCategoryModel.objects.create(**item)
-            instance.load_categories.add(load_category)
-
-        # Create and link new VehicleCategoryModel instances
-        for item in vehicle_category_data:
-            vehicle_category = VehicleCategoryModel.objects.create(**item)
-            instance.vehicle_categories.add(vehicle_category)
-
-        return instance
 class FilesSerializer(serializers.ModelSerializer):
     """Serializer for Files."""
     class Meta:

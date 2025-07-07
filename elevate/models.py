@@ -463,6 +463,13 @@ class Analysis(BaseAnalysisModel):
         default=0,
         verbose_name="file ID",
     )
+    is_load_split_file = models.CharField( 
+        max_length=400,
+        default="",
+        blank=True,
+        null=True,
+        verbose_name="load split file",
+    )
 
     class Meta:
         verbose_name = "analysis"
