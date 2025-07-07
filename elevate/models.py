@@ -2,305 +2,553 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.core.validators import MinValueValidator, MaxValueValidator
-import json
+from elevate.constants import PERCENTAGE_VALIDATOR, CATEGORY_CHOICES, VEHICLE_CATEGORY_CHOICES
+from django.core.exceptions import ValidationError
+# Abstract base class for timestamped models
 
-PERCENTAGE_VALIDATOR = [MinValueValidator(0), MaxValueValidator(100)]
+
+class TimeStampedModel(models.Model):
+    """Abstract base class for models with created_at and updated_at fields."""
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
 
 
-class UserProfile(models.Model):
+class UserProfile(TimeStampedModel):
+    """User profile model extending Django's User model."""
     user = models.OneToOneField(
-        User, on_delete=models.CASCADE, related_name='profile')
-    organization = models.CharField(max_length=255, default='Not assigned')
-    invitation_status = models.CharField(max_length=50, default='Pending')
-    invitation_username = models.CharField(max_length=255, blank=True)
-    temporary_password = models.CharField(max_length=255, blank=True)
+        User,
+        on_delete=models.CASCADE,
+        related_name="profile",
+        verbose_name="user",
+    )
+    organization = models.CharField(
+        max_length=255,
+        default="Not assigned",
+        verbose_name="organization",
+    )
+    invitation_status = models.CharField(
+        max_length=50,
+        default="Pending",
+        verbose_name="invitation status",
+    )
+    invitation_username = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="invitation username",
+    )
+    temporary_password = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="temporary password",
+    )
     invitation_token = models.CharField(
-        max_length=255, unique=True, blank=True)
+        max_length=255,
+        unique=True,
+        blank=True,
+        verbose_name="invitation token",
+    )
     password_reset_token = models.CharField(
-        max_length=255, blank=True, null=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    role = models.CharField(max_length=50, default='user')
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name="password reset token",
+    )
+    role = models.CharField(
+        max_length=50,
+        default="user",
+        verbose_name="role",
+    )
+
+    class Meta:
+        verbose_name = "user profile"
+        verbose_name_plural = "user profiles"
 
     def __str__(self):
         return f"Profile for {self.user.username}"
 
 
 class LoadCategoryModel(models.Model):
-    CATEGORY_CHOICES = (
-        ("commercial", 'Commercial'),
-        ("agricultural", 'Agricultural'),
-        ("industrial", 'Industrial'),
-        ("residential", 'Residential'),
-        ("public", 'Public'),
-        ("others", 'Others'),
-    )
+    """Model for categorizing load types."""
     category = models.CharField(
-        max_length=20, choices=CATEGORY_CHOICES, default="")
-    categoryFile = models.CharField(
-        default="", blank=True, null=True, max_length=400)
-    salesCAGR = models.IntegerField(blank=True, null=True, default=0)
-    specifySplit = models.FloatField(null=True, blank=True, default=0)
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default="",
+        verbose_name="category",
+    )
+    category_file = models.CharField(
+        max_length=400,
+        default="",
+        blank=True,
+        null=True,
+        verbose_name="category file",
+    )
+    sales_cagr = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="sales CAGR",
+    )
+    specify_split = models.FloatField(
+        default=0,
+        null=True,
+        blank=True,
+        verbose_name="specify split",
+    )
+
+    class Meta:
+        verbose_name = "load category"
+        verbose_name_plural = "load categories"
 
     def __str__(self):
         return self.category
 
 
 class VehicleCategoryModel(models.Model):
-    VEHICLE_CATEGORY_CHOICES = (
-        ("car", 'Car'),
-        ("bus", 'Bus'),
-        ("2-wheeler", '2-Wheeler'),
-        ("3-wheeler", '3-Wheeler'),
-        ("others", 'Others'),
+    """Model for categorizing vehicle types."""
+    vehicle_category = models.CharField(
+        max_length=20,
+        choices=VEHICLE_CATEGORY_CHOICES,
+        default="",
+        verbose_name="vehicle category",
     )
-    vehicleCategory = models.CharField(
-        max_length=20, choices=VEHICLE_CATEGORY_CHOICES, default="")
-    n = models.IntegerField(default=0, blank=True, null=True)
-    f = models.IntegerField(default=0, blank=True, null=True)
-    c = models.IntegerField(default=0, blank=True, null=True)
-    p = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    e = models.FloatField(default=0.0, blank=True, null=True)
-    r = models.IntegerField(default=0, blank=True, null=True)
-    k = models.IntegerField(default=0, blank=True, null=True)
-    l = models.IntegerField(default=0, blank=True, null=True)
-    g = models.IntegerField(default=0, blank=True, null=True)
-    h = models.IntegerField(default=0, blank=True, null=True)
-    s = models.IntegerField(default=0, blank=True, null=True)
-    u = models.IntegerField(default=0, blank=True, null=True)
-    rowlimit_xl = models.IntegerField(default=2000000, blank=False, null=False)
-    CAGR_V = models.IntegerField(default=0, blank=True, null=True)
-    baseElectricityTariff = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
+    vehicle_count = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="vehicle count",
+    )
+    fuel_efficiency = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="fuel efficiency",
+    )
+    cost_per_unit = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="cost per unit",
+    )
+    penetration_rate = models.FloatField(
+        default=0,
+        validators=PERCENTAGE_VALIDATOR,
+        blank=True,
+        verbose_name="penetration rate",
+    )
+    energy_consumption = models.FloatField(
+        default=0.0,
+        blank=True,
+        null=True,
+        verbose_name="energy consumption",
+    )
+    range_km = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="range (km)",
+    )
+    kwh_capacity = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="kWh capacity",
+    )
+    lifespan_years = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="lifespan (years)",
+    )
+    growth_rate = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="growth rate",
+    )
+    handling_cost = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="handling cost",
+    )
+    subsidy_amount = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="subsidy amount",
+    )
+    usage_factor = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="usage factor",
+    )
+    row_limit_xl = models.PositiveIntegerField(
+        default=2_000_000,
+        verbose_name="row limit (Excel)",
+    )
+    cagr_v = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="CAGR (vehicles)",
+    )
+    base_electricity_tariff = models.FloatField(
+        default=0,
+        validators=PERCENTAGE_VALIDATOR,
+        blank=True,
+        verbose_name="base electricity tariff",
+    )
+
+    class Meta:
+        verbose_name = "vehicle category"
+        verbose_name_plural = "vehicle categories"
 
     def __str__(self):
-        return self.vehicleCategory
+        return self.vehicle_category
 
 
-class Analysis(models.Model):
+class BaseAnalysisModel(TimeStampedModel):
+    """Abstract base class for analysis models."""
     user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='analyses')
-    name = models.CharField(max_length=255)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    # Load Category Fields
-    loadCategory = models.IntegerField(
-        default=0, validators=[MinValueValidator(1), MaxValueValidator(6)])
-    isLoadSplit = models.CharField(max_length=20, choices=(
-        ("yes", 'Yes'), ("no", 'No')), default="")
-    isLoadSplitFile = models.CharField(
-        default="", blank=True, null=True, max_length=400)
-    loadCategory1 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='load_cat_1')
-    loadCategory2 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='load_cat_2')
-    loadCategory3 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='load_cat_3')
-    loadCategory4 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='load_cat_4')
-    loadCategory5 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='load_cat_5')
-    loadCategory6 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='load_cat_6')
-    category_data = models.JSONField(default=list)
-
-    # Vehicle Category Fields
-    numOfvehicleCategory = models.IntegerField(blank=True, null=True, default=0, validators=[
-                                               MinValueValidator(1), MaxValueValidator(5)])
-    vehicleCategoryData1 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_cat_1')
-    vehicleCategoryData2 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_cat_2')
-    vehicleCategoryData3 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_cat_3')
-    vehicleCategoryData4 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_cat_4')
-    vehicleCategoryData5 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_cat_5')
-    vehicle_category_data = models.JSONField(default=list)
-
-    # Analysis Parameters
-    resolution = models.IntegerField(default=0, validators=[MinValueValidator(
-        1), MaxValueValidator(100)], blank=True, null=True)
-    BR_F = models.CharField(max_length=10, default="", blank=True)
-    shared_saving = models.IntegerField(default=0, blank=True, null=True)
-    sum_pk_cost = models.FloatField(default=0, blank=True, null=True)
-    sum_zero_cost = models.FloatField(default=0, blank=True, null=True)
-    sum_op_cost = models.FloatField(default=0, blank=True, null=True)
-    win_pk_cost = models.FloatField(default=0, blank=True, null=True)
-    win_zero_cost = models.FloatField(default=0, blank=True, null=True)
-    win_op_cost = models.FloatField(default=0, blank=True, null=True)
-    summer_date = models.JSONField(default=list)
-    winter_date = models.JSONField(default=list)
-    s_pks = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_pke = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_sx = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    s_ops = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_ope = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_rb = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    w_pks = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_pke = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_sx = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    w_ops = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_ope = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_rb = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
+        User,
+        on_delete=models.CASCADE,
+        related_name="%(class)s_analyses",
+        verbose_name="user",
+    )
+    name = models.CharField(
+        max_length=255,
+        verbose_name="analysis name",
+    )
+    load_category_count = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MinValueValidator(1), MaxValueValidator(6)],
+        verbose_name="load category count",
+    )
+    is_load_split = models.CharField(
+        max_length=20,
+        choices=(("yes", "Yes"), ("no", "No")),
+        default="",
+        verbose_name="is load split",
+    )
+    load_split_file = models.CharField(
+        max_length=400,
+        default="",
+        blank=True,
+        null=True,
+        verbose_name="load split file",
+    )
+    load_categories = models.ManyToManyField(
+        LoadCategoryModel,
+        related_name="%(class)s_load_categories",
+        blank=True,
+        verbose_name="load categories",
+    )
+    category_data = models.JSONField(
+        default=list,
+        verbose_name="category data",
+    )
+    vehicle_category_count = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        blank=True,
+        null=True,
+        verbose_name="vehicle category count",
+    )
+    vehicle_categories = models.ManyToManyField(
+        VehicleCategoryModel,
+        related_name="%(class)s_vehicle_categories",
+        blank=True,
+        verbose_name="vehicle categories",
+    )
+    vehicle_category_data = models.JSONField(
+        default=list,
+        verbose_name="vehicle category data",
+    )
+    resolution = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        blank=True,
+        null=True,
+        verbose_name="resolution",
+    )
+    br_f = models.CharField(
+        max_length=10,
+        default="",
+        blank=True,
+        verbose_name="BR F",
+    )
+    shared_saving = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="shared saving",
+    )
+    summer_peak_cost = models.FloatField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="summer peak cost",
+    )
+    summer_zero_cost = models.FloatField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="summer zero cost",
+    )
+    summer_op_cost = models.FloatField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="summer operating cost",
+    )
+    winter_peak_cost = models.FloatField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="winter peak cost",
+    )
+    winter_zero_cost = models.FloatField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="winter zero cost",
+    )
+    winter_op_cost = models.FloatField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name="winter operating cost",
+    )
+    summer_date = models.JSONField(
+        default=list,
+        verbose_name="summer date",
+    )
+    winter_date = models.JSONField(
+        default=list,
+        verbose_name="winter date",
+    )
+    summer_peak_start = models.CharField(
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="summer peak start",
+    )
+    summer_peak_end = models.CharField(
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="summer peak end",
+    )
+    summer_sx = models.FloatField(
+        default=0,
+        validators=PERCENTAGE_VALIDATOR,
+        blank=True,
+        verbose_name="summer sx",
+    )
+    summer_op_start = models.CharField(
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="summer operating start",
+    )
+    summer_op_end = models.CharField(
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="summer operating end",
+    )
+    summer_rb = models.FloatField(
+        default=0,
+        validators=PERCENTAGE_VALIDATOR,
+        blank=True,
+        verbose_name="summer rb",
+    )
+    winter_peak_start = models.CharField(
+        max_length=10,
+        default="00:00",
+        blank=False,
+        null=False,
+        verbose_name="winter peak start",
+    )
+    winter_peak_end = models.CharField(
+        max_length=10,
+        default="00:00",
+        blank=False,
+        null=False,
+        verbose_name="winter peak end",
+    )
+    winter_sx = models.FloatField(
+        default=0,
+        validators=PERCENTAGE_VALIDATOR,
+        blank=True,
+        verbose_name="winter sx",
+    )
+    winter_op_start = models.CharField(
+        max_length=10,
+        default="00:00",
+        blank=False,
+        null=False,
+        verbose_name="winter operating start",
+    )
+    winter_op_end = models.CharField(
+        max_length=10,
+        default="00:00",
+        blank=False,
+        null=False,
+        verbose_name="winter operating end",
+    )
+    winter_rb = models.FloatField(
+        default=0,
+        validators=PERCENTAGE_VALIDATOR,
+        blank=True,
+        verbose_name="winter rb",
+    )
     date1_start = models.CharField(
-        default="", blank=False, null=False, max_length=10)
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="date 1 start",
+    )
     date1_end = models.CharField(
-        default="", blank=False, null=False, max_length=10)
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="date 1 end",
+    )
     date2_start = models.CharField(
-        default="", blank=False, null=False, max_length=10)
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="date 2 start",
+    )
     date2_end = models.CharField(
-        default="", blank=False, null=False, max_length=10)
-
-    # Additional Fields from evAnalysis
-    fileId = models.IntegerField(default=0, blank=False, null=False)
+        max_length=10,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="date 2 end",
+    )
     user_name = models.CharField(
-        default="", blank=False, null=False, max_length=50)
+        max_length=50,
+        default="",
+        blank=True,
+        null=True,
+        verbose_name="user name",
+    )
+
+    def clean(self):
+        if not isinstance(self.category_data, list):
+            raise ValidationError("category_data must be a list")
+        if not isinstance(self.vehicle_category_data, list):
+            raise ValidationError("vehicle_category_data must be a list")
+
+    class Meta:
+        abstract = True
+
+
+class Analysis(BaseAnalysisModel):
+    """Model for user-specific analyses."""
+    file_id = models.PositiveIntegerField(
+        default=0,
+        verbose_name="file ID",
+    )
+
+    class Meta:
+        verbose_name = "analysis"
+        verbose_name_plural = "analyses"
 
     def __str__(self):
         return f"Analysis {self.name} for {self.user.username} (ID: {self.id})"
 
 
-class PermanentAnalysis(models.Model):
+class PermanentAnalysis(BaseAnalysisModel):
+    """Model for permanent analyses with nullable user."""
     user = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='permanent_analyses'
+        related_name="%(class)s_analyses",
+        verbose_name="user",
     )
-    name = models.CharField(max_length=255)
-    created_at = models.DateTimeField(default=timezone.now)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    # Load Category Fields
-    loadCategory = models.IntegerField(
-        default=0, validators=[MinValueValidator(1), MaxValueValidator(6)])
-    isLoadSplit = models.CharField(max_length=20, choices=(
-        ("yes", 'Yes'), ("no", 'No')), default="")
-    isLoadSplitFile = models.CharField(
-        default="", blank=True, null=True, max_length=400)
-    loadCategory1 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_load_cat_1')
-    loadCategory2 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_load_cat_2')
-    loadCategory3 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_load_cat_3')
-    loadCategory4 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_load_cat_4')
-    loadCategory5 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_load_cat_5')
-    loadCategory6 = models.ForeignKey(
-        LoadCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_load_cat_6')
-    category_data = models.JSONField(default=list)
-
-    # Vehicle Category Fields
-    numOfvehicleCategory = models.IntegerField(blank=True, null=True, default=0, validators=[
-                                               MinValueValidator(1), MaxValueValidator(5)])
-    vehicleCategoryData1 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_vehicle_cat_1')
-    vehicleCategoryData2 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_vehicle_cat_2')
-    vehicleCategoryData3 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_vehicle_cat_3')
-    vehicleCategoryData4 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_vehicle_cat_4')
-    vehicleCategoryData5 = models.ForeignKey(
-        VehicleCategoryModel, on_delete=models.SET_NULL, null=True, blank=True, related_name='permanent_vehicle_cat_5')
-    vehicle_category_data = models.JSONField(default=list)
-
-
-    # Analysis Parameters
-    resolution = models.IntegerField(default=0, validators=[MinValueValidator(
-        1), MaxValueValidator(100)], blank=True, null=True)
-    BR_F = models.CharField(max_length=10, default="", blank=True)
-    shared_saving = models.IntegerField(default=0, blank=True, null=True)
-    sum_pk_cost = models.FloatField(default=0, blank=True, null=True)
-    sum_zero_cost = models.FloatField(default=0, blank=True, null=True)
-    sum_op_cost = models.FloatField(default=0, blank=True, null=True)
-    win_pk_cost = models.FloatField(default=0, blank=True, null=True)
-    win_zero_cost = models.FloatField(default=0, blank=True, null=True)
-    win_op_cost = models.FloatField(default=0, blank=True, null=True)
-    summer_date = models.JSONField(default=list)
-    winter_date = models.JSONField(default=list)
-    s_pks = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_pke = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_sx = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    s_ops = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_ope = models.CharField(default="", blank=False,
-                             null=False, max_length=10)
-    s_rb = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    w_pks = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_pke = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_sx = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    w_ops = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_ope = models.CharField(
-        default="00:00", blank=False, null=False, max_length=10)
-    w_rb = models.FloatField(
-        default=0, validators=PERCENTAGE_VALIDATOR, blank=True)
-    date1_start = models.CharField(
-        default="", blank=False, null=False, max_length=10)
-    date1_end = models.CharField(
-        default="", blank=False, null=False, max_length=10)
-    date2_start = models.CharField(
-        default="", blank=False, null=False, max_length=10)
-    date2_end = models.CharField(
-        default="", blank=False, null=False, max_length=10)
-    # Paste the rest of the fields from Analysis except `fileId`
-
-    user_name = models.CharField(
-        default="", blank=True, null=True, max_length=50)
+    class Meta:
+        verbose_name = "permanent analysis"
+        verbose_name_plural = "permanent analyses"
 
     def __str__(self):
-            return f"Analysis {self.name} for {self.user.username} (ID: {self.id})"
-
+        return f"Permanent Analysis {self.name} for {self.user.username if self.user else 'Anonymous'} (ID: {self.id})"
 
 
 class Files(models.Model):
-    file = models.FileField(upload_to="FileUpload/", blank=False, null=False)
+    """Model for storing uploaded files."""
+    file = models.FileField(
+        upload_to="file_upload/",
+        blank=False,
+        null=False,
+        verbose_name="file",
+    )
+
+    class Meta:
+        verbose_name = "file"
+        verbose_name_plural = "files"
 
     def delete(self, *args, **kwargs):
-        storage, path = self.file.storage, self.file.path
-        super().delete(*args, **kwargs)
-        storage.delete(path)
+        """Delete the file from storage and database."""
+        try:
+            storage, path = self.file.storage, self.file.path
+            super().delete(*args, **kwargs)
+            storage.delete(path)
+        except Exception as e:
+            # Log the error (assuming a logging setup)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error deleting file {self.file.name}: {str(e)}")
 
     def __str__(self):
         return f"File {self.id}"
 
 
 class UserAnalysis(models.Model):
-    userName = models.CharField(
-        default="", blank=False, null=False, max_length=50)
-    status = models.CharField(default="", blank=True, null=True, max_length=20)
-    errorLog = models.TextField()
-    time = models.FloatField(default=0.0, blank=True, null=True)
+    """Model for logging user analysis activities."""
+    user_name = models.CharField(
+        max_length=50,
+        default="",
+        blank=False,
+        null=False,
+        verbose_name="user name",
+    )
+    status = models.CharField(
+        max_length=20,
+        default="",
+        blank=True,
+        null=True,
+        verbose_name="status",
+    )
+    error_log = models.TextField(
+        verbose_name="error log",
+    )
+    time = models.FloatField(
+        default=0.0,
+        blank=True,
+        null=True,
+        verbose_name="time",
+    )
 
     class Meta:
-        verbose_name_plural = "User Analyses Log"
+        verbose_name = "user analysis log"
+        verbose_name_plural = "user analyses log"
 
     def __str__(self):
-        return f"Analysis Log for {self.userName}"
-
+        return f"Analysis Log for {self.user_name}"
