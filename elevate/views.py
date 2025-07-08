@@ -1,5 +1,6 @@
 # elevate/views.py
 from django.http import HttpResponse, JsonResponse
+from django.db.models import Count
 from django.shortcuts import render, redirect
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
@@ -320,14 +321,26 @@ class GetInvitationDetailsAPI(APIView):
 
 
 class ListInvitedUsersAPI(generics.ListAPIView):
-    """API to list invited users."""
+    """API to list invited users and total number of templates."""
     serializer_class = InvitedUserProfileSerializer
     permission_classes = [permissions.IsAdminUser]
 
     def get_queryset(self):
-        return User.objects.filter(profile__invitation_status__in=['Pending', 'Accepted'])
+        return User.objects.filter(
+            profile__invitation_status__in=['Pending', 'Accepted']
+        )
 
-
+    def list(self, request, *args, **kwargs):
+        """Override list method to include total template count."""
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        total_templates = PermanentAnalysis.objects.count()
+        response_data = {
+            'invited_users': serializer.data,
+            'total_templates': total_templates
+        }
+        return Response(response_data)
+    
 class DeleteInvitedUserAPI(generics.DestroyAPIView):
     """API to delete an invited user."""
     permission_classes = [permissions.IsAdminUser]
