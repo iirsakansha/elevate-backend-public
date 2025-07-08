@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import shutil
 import logging
+from urllib.parse import urlparse
 import numpy as np
 import pandas as pd
 from scipy import stats as ss
@@ -13,7 +14,7 @@ from datetime import datetime
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.db import transaction
-from ..models import Analysis, LoadCategoryModel, VehicleCategoryModel, UserAnalysis
+from ..models import Analysis, LoadCategoryModel, VehicleCategoryModel, UserAnalysis, Files
 from ..serializers import AnalysisSerializer, LoadCategoryModelSerializer, VehicleCategoryModelSerializer
 from ..exceptions import (
     InvalidFileError, AnalysisProcessingError, InvalidCategoryError,
@@ -52,11 +53,12 @@ class AnalysisService:
         return data
 
     def process_analysis(self):
-        """Process the EV analysis request."""
+        """Process the EV analysis request and delete all related data after success."""
         created_load_categories = []
         created_vehicle_categories = []
         file_path = None
         ev_instance = None
+        user_analysis_log = None
         try:
             all_data = self.request.data.copy()
             files = self.request.FILES
@@ -98,7 +100,8 @@ class AnalysisService:
             )
 
             analysis_data = self._prepare_analysis_data(ev_instance)
-            results = self._run_full_analysis(analysis_data, str(ev_instance.id))
+            results = self._run_full_analysis(
+                analysis_data, str(ev_instance.id))
 
             user_analysis_log.status = 'Completed'
             user_analysis_log.time = time.time() - self.start_time
@@ -106,6 +109,22 @@ class AnalysisService:
 
             # Clean the results before returning
             cleaned_results = self._clean_numeric_data(results)
+
+            # Delete all related data and file after successful analysis
+            self._cleanup_temporary_data(
+                created_load_categories,
+                created_vehicle_categories,
+                ev_instance,
+                file_path
+            )
+            if user_analysis_log:
+                try:
+                    user_analysis_log.delete()
+                    logger.info(
+                        f"Deleted user analysis log for {self.user.username}")
+                except Exception as e:
+                    logger.error(f"Error deleting user analysis log: {str(e)}")
+
             return cleaned_results
 
         except Exception as e:
@@ -192,39 +211,67 @@ class AnalysisService:
         processed_data['vehicle_category_count'] = len(vehicle_categories)
         return processed_data, created_load_categories, created_vehicle_categories
 
-    def _cleanup_temporary_data(self, load_categories, vehicle_categories, ev_instance, file_path):
-        """Clean up temporary data created during analysis."""
+    def _cleanup_temporary_data(self, load_categories, vehicle_categories, ev_instance, load_split_file_url=None, is_load_split="no"):
+        """Clean up temporary data created during analysis.
+
+        Args:
+            load_categories: List of load category objects to delete.
+            vehicle_categories: List of vehicle category objects to delete.
+            ev_instance: EV analysis instance to delete.
+            load_split_file_url: URL of the load split file (e.g., http://127.0.0.1:8000/media/file_upload/DT_Data_Upload_P5V1Hed.xls).
+            is_load_split: String indicating whether load is split ('yes' to skip file deletion, 'no' to delete).
+        """
         with transaction.atomic():
             try:
                 if load_categories:
                     LoadCategoryModel.objects.filter(
                         id__in=[cat.id for cat in load_categories]).delete()
-                    logger.info(
-                        f"Deleted {len(load_categories)} load categories")
+                    logger.info(f"Deleted {len(load_categories)} load categories")
             except Exception as e:
-                logger.error(f"Error deleting load categories: {e}")
+                logger.error(f"Error deleting load categories: {e}", exc_info=True)
+
             try:
                 if vehicle_categories:
                     VehicleCategoryModel.objects.filter(
                         id__in=[veh.id for veh in vehicle_categories]).delete()
-                    logger.info(
-                        f"Deleted {len(vehicle_categories)} vehicle categories")
+                    logger.info(f"Deleted {len(vehicle_categories)} vehicle categories")
             except Exception as e:
-                logger.error(f"Error deleting vehicle categories: {e}")
+                logger.error(f"Error deleting vehicle categories: {e}", exc_info=True)
+
             try:
                 if ev_instance:
                     ev_instance.delete()
-                    logger.info(
-                        f"Deleted EV analysis instance {ev_instance.id}")
+                    logger.info(f"Deleted EV analysis instance {ev_instance.id}")
+                else:
+                    logger.warning("No EV analysis instance provided for deletion")
             except Exception as e:
-                logger.error(f"Error deleting EV analysis instance: {e}")
-            try:
-                if file_path and os.path.exists(file_path):
-                    os.remove(file_path)
-                    logger.info(f"Deleted temporary file: {file_path}")
-            except Exception as e:
-                logger.error(f"Error deleting file {file_path}: {e}")
+                logger.error(f"Error deleting EV analysis instance: {e}", exc_info=True)
 
+            try:
+                if load_split_file_url and is_load_split.lower() == "no":
+                    # Extract file path from URL
+                    parsed_url = urlparse(load_split_file_url)
+                    relative_path = parsed_url.path.lstrip("/media/")  # e.g., file_upload/DT_Data_Upload_P5V1Hed.xls
+                    file_path = os.path.join(settings.MEDIA_ROOT, relative_path.replace("/", os.sep))
+                    logger.debug(f"Attempting to delete file with relative path: {relative_path}, absolute path: {file_path}")
+
+                    # Delete the file from Files model
+                    files_deleted = Files.objects.filter(file=relative_path).delete()
+                    logger.info(f"Deleted {files_deleted[0]} file records from Files model")
+
+                    # Delete the file from filesystem
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        logger.info(f"Deleted temporary file from filesystem: {file_path}")
+                    else:
+                        logger.warning(f"File not found in filesystem: {file_path}")
+                elif load_split_file_url and is_load_split.lower() == "yes":
+                    logger.info(f"Skipping file deletion for {load_split_file_url} as is_load_split is 'yes'")
+                else:
+                    logger.warning(f"No load_split_file_url provided or invalid is_load_split value: {is_load_split}")
+            except Exception as e:
+                logger.error(f"Error deleting file {load_split_file_url}: {e}", exc_info=True)
+                
     def _prepare_analysis_data(self, ev_instance):
         """Prepare data for analysis."""
         load_categories = []
@@ -317,7 +364,7 @@ class AnalysisService:
             ]
         }
         return analysis_data
-    
+
     def _run_full_analysis(self, input_data, folder_id):
         """Run the full EV load forecasting analysis."""
         def load_forecast(
@@ -356,7 +403,7 @@ class AnalysisService:
                 ex1 = np.arange(blocks.min(), blocks.max()+1, 1)
                 mu = max(math.ceil(kwh_capacity/input_data['resolution']), 1)
                 sigma = max(math.ceil(lifespan_years /
-                            input_data['resolution']), 1)
+                                      input_data['resolution']), 1)
 
                 # Use safe normal distribution calculation
                 block_charges = total_charges * ss.norm.pdf(ex1, mu, sigma)
@@ -859,7 +906,7 @@ class AnalysisService:
                         f"Zero denominator in calculate_tod_surcharge for year {year_num}, returning 0")
                     return 0
                 result = 100 * (numerator - (s_pk_sum + w_pk_sum +
-                                s_op_sum + w_op_sum + s_0_sum + w_0_sum)) / denominator
+                                             s_op_sum + w_op_sum + s_0_sum + w_0_sum)) / denominator
                 return round(result, 2)
             except Exception as e:
                 logger.error(
