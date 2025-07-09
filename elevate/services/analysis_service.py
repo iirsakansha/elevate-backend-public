@@ -1,4 +1,5 @@
 # elevate/services/analysis_service.py
+import errno
 from pathlib import Path
 import os
 import shutil
@@ -37,7 +38,6 @@ class AnalysisService:
         """Clean numeric data to remove NaN, inf, and other problematic values."""
         if isinstance(data, (list, np.ndarray)):
             data = np.array(data)
-            # Replace NaN and inf with 0
             data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
             return data.tolist()
         elif isinstance(data, pd.DataFrame):
@@ -65,12 +65,10 @@ class AnalysisService:
 
             file_path = self._handle_file_upload(all_data, files)
             all_data['is_load_split_file'] = file_path if file_path else all_data.get(
-                'is_load_split_file')
+                'is_load_split_file', all_data.get('load_split_file'))
 
             if 'name' not in all_data:
                 all_data['name'] = self.user.username
-                logger.info(
-                    f"Set default name to {self.user.username} for invited user")
 
             processed_data, created_load_categories, created_vehicle_categories = self._process_categories(
                 all_data)
@@ -85,7 +83,6 @@ class AnalysisService:
                     f"Invalid analysis data: {serializer.errors}")
             ev_instance = serializer.save(user=self.user)
 
-            # Link the created categories to the Analysis instance
             for category in created_load_categories:
                 ev_instance.load_categories.add(category)
             for vehicle in created_vehicle_categories:
@@ -100,28 +97,24 @@ class AnalysisService:
             )
 
             analysis_data = self._prepare_analysis_data(ev_instance)
-            results = self._run_full_analysis(
-                analysis_data, str(ev_instance.id))
+            results = self._run_full_analysis(analysis_data, str(ev_instance.id))
 
             user_analysis_log.status = 'Completed'
             user_analysis_log.time = time.time() - self.start_time
             user_analysis_log.save()
 
-            # Clean the results before returning
             cleaned_results = self._clean_numeric_data(results)
 
-            # Delete all related data and file after successful analysis
             self._cleanup_temporary_data(
                 created_load_categories,
                 created_vehicle_categories,
                 ev_instance,
-                file_path
+                file_path,
+                all_data.get('is_load_split', 'no')
             )
             if user_analysis_log:
                 try:
                     user_analysis_log.delete()
-                    logger.info(
-                        f"Deleted user analysis log for {self.user.username}")
                 except Exception as e:
                     logger.error(f"Error deleting user analysis log: {str(e)}")
 
@@ -138,47 +131,60 @@ class AnalysisService:
                 time=time.time() - self.start_time
             )
             self._cleanup_temporary_data(
-                created_load_categories, created_vehicle_categories, ev_instance, file_path)
+                created_load_categories, created_vehicle_categories, ev_instance, file_path, all_data.get('is_load_split', 'no'))
             raise AnalysisProcessingError(error_message, error_traceback)
 
     def _handle_file_upload(self, all_data, files):
         """Handle file upload and return file path."""
-        # Skip file processing if is_load_split is "no"
-        if all_data.get('is_load_split') == 'no':
-            return None
-
-        if 'is_load_split_file' in all_data and isinstance(all_data['is_load_split_file'], str):
-            # Normalize file path and remove leading 'media/' or 'media\'
-            file_relative_path = all_data['is_load_split_file'].replace(
-                '\\', os.sep).replace('/', os.sep)
-            file_relative_path = file_relative_path.lstrip(
-                os.sep).lstrip('media' + os.sep)
+        
+        file_key = 'is_load_split_file' if 'is_load_split_file' in all_data else 'load_split_file'
+        
+        if file_key in all_data and isinstance(all_data[file_key], str):
+            file_relative_path = all_data[file_key]
+            
+            if file_relative_path.startswith('http'):
+                parsed_url = urlparse(file_relative_path)
+                file_relative_path = parsed_url.path.lstrip('/')
+                if file_relative_path.startswith('media/'):
+                    file_relative_path = file_relative_path[6:]
+            else:
+                # For non-URL paths, clean up the path
+                file_relative_path = file_relative_path.lstrip(os.sep)
+                if file_relative_path.startswith('media' + os.sep):
+                    file_relative_path = file_relative_path[6:]
             file_path = os.path.join(settings.MEDIA_ROOT, file_relative_path)
+        
             if not os.path.exists(file_path):
+                logger.error(f"File not found at path: {file_path}")
                 raise InvalidFileError(f"File not found at path: {file_path}")
+            
             return file_path
+        
         elif 'is_load_split_file' in files:
             file = files.get('is_load_split_file')
             if not file:
-                raise InvalidFileError(
-                    "No file provided for is_load_split_file")
+                logger.error("No file provided in files['is_load_split_file']")
+                raise InvalidFileError("No file provided for is_load_split_file")
+            
             if not file.name.endswith('.xlsx'):
+                logger.error(f"Invalid file type: {file.name}")
                 raise InvalidFileError("Only Excel files are supported")
+            
             fs = FileSystemStorage()
-            os.makedirs(os.path.join(settings.MEDIA_ROOT,
-                        self.UPLOAD_FOLDER), exist_ok=True)
-            filename = fs.save(os.path.join(
-                self.UPLOAD_FOLDER, file.name), file)
-            return fs.path(filename)
+            os.makedirs(os.path.join(settings.MEDIA_ROOT, self.UPLOAD_FOLDER), exist_ok=True)
+            filename = fs.save(os.path.join(self.UPLOAD_FOLDER, file.name), file)
+            file_path = fs.path(filename)
+            return file_path
+        
+        logger.warning("No file provided in request")
         return None
-
+    
     def _process_categories(self, all_data):
         """Process load and vehicle categories."""
         processed_data = {}
         created_load_categories = []
         created_vehicle_categories = []
-        load_categories = all_data.get(
-            'category_data', []) or all_data.get('categoryData', [])
+        load_categories = all_data.get('category_data', []) or all_data.get('categoryData', [])
         if len(load_categories) > 6:
             raise InvalidCategoryError("Maximum 6 load categories allowed")
         for idx, category_data in enumerate(load_categories[:6], start=1):
@@ -191,9 +197,7 @@ class AnalysisService:
                 raise InvalidCategoryError(error_msg)
             category = serializer.save()
             created_load_categories.append(category)
-            # Do not set load_category_{idx} in processed_data
-        vehicle_categories = all_data.get(
-            'vehicle_category_data', []) or all_data.get('vehicleCategoryData', [])
+        vehicle_categories = all_data.get('vehicle_category_data', []) or all_data.get('vehicleCategoryData', [])
         if len(vehicle_categories) > 5:
             raise InvalidCategoryError("Maximum 5 vehicle categories allowed")
         for idx, vehicle_data in enumerate(vehicle_categories[:5], start=1):
@@ -206,27 +210,17 @@ class AnalysisService:
                 raise InvalidCategoryError(error_msg)
             vehicle = serializer.save()
             created_vehicle_categories.append(vehicle)
-            # Do not set vehicle_category_data_{idx} in processed_data
         processed_data['load_category_count'] = len(load_categories)
         processed_data['vehicle_category_count'] = len(vehicle_categories)
         return processed_data, created_load_categories, created_vehicle_categories
 
     def _cleanup_temporary_data(self, load_categories, vehicle_categories, ev_instance, load_split_file_url=None, is_load_split="no"):
-        """Clean up temporary data created during analysis.
-
-        Args:
-            load_categories: List of load category objects to delete.
-            vehicle_categories: List of vehicle category objects to delete.
-            ev_instance: EV analysis instance to delete.
-            load_split_file_url: URL of the load split file (e.g., http://127.0.0.1:8000/media/file_upload/DT_Data_Upload_P5V1Hed.xls).
-            is_load_split: String indicating whether load is split ('yes' to skip file deletion, 'no' to delete).
-        """
+        """Clean up temporary data created during analysis."""
         with transaction.atomic():
             try:
                 if load_categories:
                     LoadCategoryModel.objects.filter(
                         id__in=[cat.id for cat in load_categories]).delete()
-                    logger.info(f"Deleted {len(load_categories)} load categories")
             except Exception as e:
                 logger.error(f"Error deleting load categories: {e}", exc_info=True)
 
@@ -234,48 +228,76 @@ class AnalysisService:
                 if vehicle_categories:
                     VehicleCategoryModel.objects.filter(
                         id__in=[veh.id for veh in vehicle_categories]).delete()
-                    logger.info(f"Deleted {len(vehicle_categories)} vehicle categories")
             except Exception as e:
-                logger.error(f"Error deleting vehicle categories: {e}", exc_info=True)
+                logger.error(
+                    f"Error deleting vehicle categories: {e}", exc_info=True)
 
             try:
                 if ev_instance:
                     ev_instance.delete()
-                    logger.info(f"Deleted EV analysis instance {ev_instance.id}")
                 else:
                     logger.warning("No EV analysis instance provided for deletion")
             except Exception as e:
-                logger.error(f"Error deleting EV analysis instance: {e}", exc_info=True)
+                logger.error(
+                    f"Error deleting EV analysis instance: {e}", exc_info=True)
 
             try:
-                if load_split_file_url and is_load_split.lower() == "no":
-                    # Extract file path from URL
+                if load_split_file_url:
                     parsed_url = urlparse(load_split_file_url)
-                    relative_path = parsed_url.path.lstrip("/media/")  # e.g., file_upload/DT_Data_Upload_P5V1Hed.xls
-                    file_path = os.path.join(settings.MEDIA_ROOT, relative_path.replace("/", os.sep))
-                    logger.debug(f"Attempting to delete file with relative path: {relative_path}, absolute path: {file_path}")
+                    relative_path = parsed_url.path.lstrip("/media/")
+                    file_path = os.path.join(
+                        settings.MEDIA_ROOT, relative_path.replace("/", os.sep))
+                    logger.debug(
+                        f"Attempting to delete file with relative path: {relative_path}, absolute path: {file_path}")
 
-                    # Delete the file from Files model
-                    files_deleted = Files.objects.filter(file=relative_path).delete()
-                    logger.info(f"Deleted {files_deleted[0]} file records from Files model")
+                    # Delete record from Files model
+                    files_deleted = Files.objects.filter(
+                        file=relative_path).delete()
 
-                    # Delete the file from filesystem
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        logger.info(f"Deleted temporary file from filesystem: {file_path}")
+                    # Check is_load_split value
+                    if is_load_split.lower() not in ["yes", "no"]:
+                        logger.warning(
+                            f"Invalid is_load_split value: {is_load_split}, defaulting to 'no' for deletion")
+                        is_load_split = "no"
+
+                    if is_load_split.lower() == "no":
+                        if os.path.exists(file_path):
+                            # Retry deletion up to 3 times in case of file locking
+                            max_attempts = 3
+                            for attempt in range(1, max_attempts + 1):
+                                try:
+                                    os.remove(file_path)
+                                    break
+                                except OSError as e:
+                                    # Permission denied (file locked)
+                                    if e.errno == errno.EACCES:
+                                        logger.warning(
+                                            f"File {file_path} is locked, retrying ({attempt}/{max_attempts})")
+                                        # Wait briefly before retrying
+                                        time.sleep(0.5)
+                                        if attempt == max_attempts:
+                                            logger.error(
+                                                f"Failed to delete file {file_path} after {max_attempts} attempts: {e}")
+                                    else:
+                                        logger.error(
+                                            f"Error deleting file {file_path}: {e}", exc_info=True)
+                                        break
+                        else:
+                            logger.warning(
+                                f"File not found in filesystem: {file_path}")
                     else:
-                        logger.warning(f"File not found in filesystem: {file_path}")
-                elif load_split_file_url and is_load_split.lower() == "yes":
-                    logger.info(f"Skipping file deletion for {load_split_file_url} as is_load_split is 'yes'")
+                        logger.info(
+                            f"Skipping file deletion for {load_split_file_url} as is_load_split is 'yes'")
                 else:
-                    logger.warning(f"No load_split_file_url provided or invalid is_load_split value: {is_load_split}")
+                    logger.warning(
+                        "No load_split_file_url provided, skipping file deletion")
             except Exception as e:
-                logger.error(f"Error deleting file {load_split_file_url}: {e}", exc_info=True)
-                
+                logger.error(
+                    f"Error in file cleanup for {load_split_file_url}: {e}", exc_info=True)
+            
     def _prepare_analysis_data(self, ev_instance):
         """Prepare data for analysis."""
         load_categories = []
-        # Retrieve all load categories from the ManyToManyField
         for i, cat in enumerate(ev_instance.load_categories.all(), start=1):
             if i > ev_instance.load_category_count:
                 break
@@ -289,7 +311,6 @@ class AnalysisService:
                 f"Expected {ev_instance.load_category_count} load categories, found {len(load_categories)}")
 
         vehicle_categories = []
-        # Retrieve all vehicle categories from the ManyToManyField
         for i, vehicle in enumerate(ev_instance.vehicle_categories.all(), start=1):
             if i > ev_instance.vehicle_category_count:
                 break
@@ -373,18 +394,15 @@ class AnalysisService:
             growth_rate, handling_cost, subsidy_amount, usage_factor,
             row_limit_xl, cagr_v, tariff
         ):
-            # Validate inputs and set defaults for problematic values
             if input_data['resolution'] <= 0:
                 raise ValueError("Resolution must be positive")
             if penetration_rate <= 0:
-                penetration_rate = 1  # Set minimum value instead of raising error
+                penetration_rate = 1
             if energy_consumption <= 0:
-                energy_consumption = 1  # Set minimum value instead of raising error
+                energy_consumption = 1
 
-            # Ensure all parameters are numeric and valid
             vehicle_count = max(float(vehicle_count), 0)
             fuel_efficiency = max(float(fuel_efficiency), 0)
-            # Avoid division by zero
             cost_per_unit = max(float(cost_per_unit), 0.01)
             penetration_rate = max(float(penetration_rate), 0.01)
             energy_consumption = max(float(energy_consumption), 0.01)
@@ -403,18 +421,15 @@ class AnalysisService:
                 ex1 = np.arange(blocks.min(), blocks.max()+1, 1)
                 mu = max(math.ceil(kwh_capacity/input_data['resolution']), 1)
                 sigma = max(math.ceil(lifespan_years /
-                                      input_data['resolution']), 1)
+                            input_data['resolution']), 1)
 
-                # Use safe normal distribution calculation
                 block_charges = total_charges * ss.norm.pdf(ex1, mu, sigma)
                 block_charges = np.nan_to_num(
                     block_charges, nan=0.0, posinf=0.0, neginf=0.0)
-                block_charges_column = np.reshape(
-                    block_charges, (blocks.max(), 1))
+                block_charges_column = np.reshape(block_charges, (blocks.max(), 1))
 
                 range_km = int(range_km)
-                kilometers = np.arange(
-                    0, range_km+1, 1).reshape((1, range_km+1))
+                kilometers = np.arange(0, range_km+1, 1).reshape((1, range_km+1))
                 starting_soc = 100 * (1 - (kilometers/max(range_km, 1)))
                 starting_soc = np.nan_to_num(
                     starting_soc, nan=0.0, posinf=100.0, neginf=0.0)
@@ -453,7 +468,7 @@ class AnalysisService:
                     veh_all_comb, nan=0.0, posinf=0.0, neginf=0.0)
 
                 charging_duration = ((60*cost_per_unit/input_data['resolution']) /
-                                     (penetration_rate*energy_consumption)) * (ending_soc_matrix - starting_soc_matrix)
+                                    (penetration_rate*energy_consumption)) * (ending_soc_matrix - starting_soc_matrix)
                 charging_duration = np.nan_to_num(
                     charging_duration, nan=0.0, posinf=0.0, neginf=0.0)
                 charging_duration_p = np.where(
@@ -468,8 +483,8 @@ class AnalysisService:
                         block_idx = i % int(1440/input_data['resolution'])
                         blo_sum_linear[block_idx] += value
 
-                blo_load_sec = (
-                    penetration_rate * blo_sum_linear).reshape(1, int(1440/input_data['resolution']))
+                blo_load_sec = (penetration_rate * blo_sum_linear).reshape(1,
+                                                                        int(1440/input_data['resolution']))
                 blo_load_sec = np.nan_to_num(
                     blo_load_sec, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -477,7 +492,6 @@ class AnalysisService:
 
             except Exception as e:
                 logger.error(f"Error in load_forecast calculation: {str(e)}")
-                # Return zeros if calculation fails
                 return np.zeros((1, int(1440/input_data['resolution']))).tolist()
 
         ev_load_data = []
@@ -487,7 +501,6 @@ class AnalysisService:
                 ev_load_data.append(res)
             except Exception as e:
                 logger.error(f"Load forecast failed for vehicle: {str(e)}")
-                # Append zeros if forecast fails
                 ev_load_data.append(
                     np.zeros((1, int(1440/input_data['resolution']))).tolist())
 
@@ -503,60 +516,33 @@ class AnalysisService:
             cat_key = category['category'][0:3] if category['category'] != "others" else category['category'][0:5]
             category_split[1][cat_key] = category['specify_split']
             category_split[2][cat_key] = category['sales_cagr']
-
-        # Skip Excel file processing if is_load_split is "no"
-        if input_data['is_load_split'] == 'yes' and input_data['is_load_split_file']:
+        if input_data['is_load_split_file']:
             try:
                 excel_data = pd.read_excel(
                     input_data['is_load_split_file'], header=None)
                 if excel_data.shape[0] < 5:
-                    raise InvalidFileError(
-                        "Excel file must have at least 5 rows")
+                    raise InvalidFileError("Excel file must have at least 5 rows")
                 if excel_data.shape[1] != 11:
                     raise InvalidFileError(
                         "Excel file must have exactly 11 columns")
                 excel_data = excel_data.fillna(0).replace([np.inf, -np.inf], 0)
             except Exception as e:
                 logger.error(f"Failed to read Excel file: {str(e)}")
-                # Create fallback data
-                excel_data = pd.DataFrame(np.zeros((10, 11)))
-                # Set a default transformer capacity
-                excel_data.iloc[0, 1] = 1000
+                raise InvalidFileError(f"Failed to read Excel file: {str(e)}")
         else:
-            # Create a dummy excel_data for cases where no file is needed
-            excel_data = pd.DataFrame(np.zeros((10, 11)))
-            excel_data.iloc[0, 1] = 1000  # Set a default transformer capacity
-
-        # Continue with the rest of the analysis with proper NaN handling
-        source_data = excel_data.iloc[4:, :].copy()
-        source_data.columns = [
-            'meter_no', 'datetime_utc', 'active_b_ph', 'active_y_ph', 'active_r_ph',
-            'reactive_b_ph', 'reactive_y_ph', 'reactive_r_ph', 'vbv', 'vyv', 'vrv'
-        ]
-        source_data = source_data.reset_index(drop=True)
-        source_data = source_data.fillna(0).replace([np.inf, -np.inf], 0)
-
-        # Generate synthetic data if needed
-        if source_data.empty or source_data.shape[0] < 100:
-            # Generate synthetic load data
+            logger.warning("No file provided, generating synthetic data")
             time_blocks_per_day = int(1440 / input_data['resolution'])
-            num_days = 30  # Generate 30 days of data
-
-            # Create synthetic datetime data
+            num_days = 30
             start_date = pd.Timestamp('2023-01-01')
             datetime_range = pd.date_range(start=start_date, periods=num_days * time_blocks_per_day,
-                                           freq=f'{input_data["resolution"]}min')
-
-            # Generate synthetic load pattern
+                                        freq=f'{input_data["resolution"]}min')
             base_load = 50 + 30 * \
                 np.sin(2 * np.pi * np.arange(len(datetime_range)) /
-                       time_blocks_per_day)
+                    time_blocks_per_day)
             noise = np.random.normal(0, 5, len(datetime_range))
             calculated_load = base_load + noise
-            calculated_load = np.maximum(
-                calculated_load, 0)  # Ensure non-negative
-
-            source_data = pd.DataFrame({
+            calculated_load = np.maximum(calculated_load, 0)
+            excel_data = pd.DataFrame({
                 'meter_no': range(len(datetime_range)),
                 'datetime_utc': datetime_range,
                 'active_b_ph': calculated_load * 0.33,
@@ -569,6 +555,15 @@ class AnalysisService:
                 'vyv': np.full(len(datetime_range), 230),
                 'vrv': np.full(len(datetime_range), 230)
             })
+            excel_data = excel_data.reset_index(drop=True)
+            excel_data.iloc[0, 1] = 1000
+
+        source_data = excel_data.iloc[4:, :].copy()
+        source_data.columns = [
+            'meter_no', 'datetime_utc', 'active_b_ph', 'active_y_ph', 'active_r_ph',
+            'reactive_b_ph', 'reactive_y_ph', 'reactive_r_ph', 'vbv', 'vyv', 'vrv'
+        ]
+        source_data = source_data.fillna(0).replace([np.inf, -np.inf], 0)
 
         try:
             source_data['calculated_load'] = (
@@ -580,7 +575,6 @@ class AnalysisService:
                 0).replace([np.inf, -np.inf], 0)
 
             if 'datetime_utc' not in source_data.columns or source_data['datetime_utc'].isna().all():
-                # Generate synthetic datetime if missing
                 source_data['datetime_utc'] = pd.date_range(start='2023-01-01', periods=len(source_data),
                                                             freq=f'{input_data["resolution"]}min')
             else:
@@ -592,23 +586,16 @@ class AnalysisService:
             source_data['date'] = source_data['datetime_utc'].dt.date
         except Exception as e:
             logger.error(f"Error processing source data: {str(e)}")
-            # Create minimal synthetic data
-            source_data = pd.DataFrame({
-                'calculated_load': np.random.rand(100) * 100,
-                'datetime_utc': pd.date_range('2023-01-01', periods=100, freq='30min')
-            })
-            source_data['date'] = source_data['datetime_utc'].dt.date
+            raise AnalysisProcessingError(
+                f"Error processing source data: {str(e)}")
 
-        # Continue with rest of analysis with proper error handling
         labels = source_data['datetime_utc'].dt.date.unique()
         slots = pd.DataFrame(
             source_data['datetime_utc'].dt.time.unique(), columns=['slot_labels'])
 
-        # Ensure transformer capacity is valid
         transformer_capacity_value = excel_data.iloc[0, 1] if not pd.isna(
             excel_data.iloc[0, 1]) else 1000
-        transformer_capacity_value = max(
-            float(transformer_capacity_value), 100)  # Minimum 100
+        transformer_capacity_value = max(float(transformer_capacity_value), 100)
 
         value_to_repeat = transformer_capacity_value * \
             (float(input_data['br_f'])/100)
@@ -621,30 +608,25 @@ class AnalysisService:
         transformer_capacity['full_transformer_capacity'] = np.repeat(
             transformer_capacity_value, number_of_repeats)
 
-        # Process load data with proper error handling
         source_data.set_index('datetime_utc', inplace=True)
         calculated_load = source_data[['calculated_load']].copy()
-        calculated_load = calculated_load.fillna(
-            0).replace([np.inf, -np.inf], 0)
+        calculated_load = calculated_load.fillna(0).replace([np.inf, -np.inf], 0)
         load_data = pd.DataFrame(
             calculated_load['calculated_load'].astype(float).values)
 
         time_blocks_per_day = int(1440 / input_data['resolution'])
         total_data_points = len(load_data)
-        # Ensure at least 1 day
         complete_days = max(total_data_points // time_blocks_per_day, 1)
 
         if total_data_points % time_blocks_per_day != 0:
             load_data_trimmed = load_data.iloc[:complete_days *
-                                               time_blocks_per_day]
+                                            time_blocks_per_day]
         else:
             load_data_trimmed = load_data
 
         try:
-            load_extract = pd.DataFrame(
-                np.reshape(load_data_trimmed.to_numpy(),
-                           (complete_days, time_blocks_per_day))
-            ).T
+            load_extract = pd.DataFrame(np.reshape(
+                load_data_trimmed.to_numpy(), (complete_days, time_blocks_per_day))).T
         except ValueError as e:
             logger.error(f"Reshape error: {e}")
             raise AnalysisProcessingError(f"Data reshape failed: {str(e)}")
@@ -670,20 +652,16 @@ class AnalysisService:
         selected_ranges = [selected_range]
 
         for year in range(1, 5):
-            growth_factors = {
-                cat: category_split[1][cat] *
-                (1 + category_split[2][cat] / 100)
-                for cat in category_split[1]
-            }
-            next_range = (selected_ranges[-1]/100) * \
-                sum(growth_factors.values())
+            growth_factors = {cat: category_split[1][cat] * (
+                1 + category_split[2][cat] / 100) for cat in category_split[1]}
+            next_range = (selected_ranges[-1]/100) * sum(growth_factors.values())
             selected_ranges.append(next_range)
 
         selected_range_2, selected_range_3, selected_range_4, selected_range_5 = selected_ranges[
             1:5]
         ev_load_sum = pd.DataFrame(load_df.sum(axis=0))
         growth_factors = [(input_data['vehicle_category_data'][i]['cagr_v']) /
-                          100 + 1 for i in range(len(input_data['vehicle_category_data']))]
+                        100 + 1 for i in range(len(input_data['vehicle_category_data']))]
 
         load_df_2 = load_df.mul(growth_factors, axis=0)
         ev_load_sum_2 = pd.DataFrame(load_df_2.sum(axis=0).to_numpy())
@@ -693,6 +671,10 @@ class AnalysisService:
         ev_load_sum_4 = pd.DataFrame(load_df_4.sum(axis=0).to_numpy())
         load_df_5 = load_df_4.mul(growth_factors, axis=0)
         ev_load_sum_5 = pd.DataFrame(load_df_5.sum(axis=0).to_numpy())
+
+        # Fix: Append all EV load sums to ev_load_sums list
+        ev_load_sums = [ev_load_sum, ev_load_sum_2,
+                        ev_load_sum_3, ev_load_sum_4, ev_load_sum_5]
 
         def calculate_tod_duration(pks, pke, sx, ops, ope, rb):
             try:
@@ -718,7 +700,6 @@ class AnalysisService:
         output_data = {}
         output_data['simulated_ev_load'] = load_df.values.tolist()
         load_df_years = [load_df]
-        ev_load_sums = [ev_load_sum]
         ev_loads = []
 
         for year in range(1, 6):
@@ -726,7 +707,6 @@ class AnalysisService:
             load_df_next = last_load_df.mul(growth_factors, axis=0)
             load_df_years.append(load_df_next)
             ev_load_sum = pd.DataFrame(load_df_next.sum(axis=0).to_numpy())
-            ev_load_sums.append(ev_load_sum)
             ev_loads.append({f'year_{year}': load_df_next.sum(
                 axis=0).to_numpy().flatten().tolist()})
 
@@ -741,8 +721,7 @@ class AnalysisService:
             raise InvalidDateError(f"Invalid date range: {str(e)}")
 
         time_slots = [f"{h:02d}:{m:02d}" for h in range(24) for m in [0, 30]]
-        pivot_df = pd.DataFrame(
-            index=time_slots, columns=dates.date, dtype=float)
+        pivot_df = pd.DataFrame(index=time_slots, columns=dates.date, dtype=float)
 
         for i, date in enumerate(dates):
             base_pattern = np.array([
@@ -765,7 +744,7 @@ class AnalysisService:
 
         output_data['dt_base_load'] = pivot_df.values.tolist()
         selected_ranges = [selected_range, selected_range_2,
-                           selected_range_3, selected_range_4, selected_range_5]
+                        selected_range_3, selected_range_4, selected_range_5]
         base_loads = []
 
         for year in range(5):
@@ -866,8 +845,7 @@ class AnalysisService:
         new_utility_cost.columns = final_res.columns.astype(str)
         new_utility_cost = new_utility_cost.rename(
             columns=lambda x: x + '_new_cost')
-        retail_tariff_df = pd.DataFrame(
-            {'1': [1], '2': [1], '3': [1], '4': [1]})
+        retail_tariff_df = pd.DataFrame({'1': [1], '2': [1], '3': [1], '4': [1]})
         retail_tariff_value = retail_tariff_df.iloc[0].mean()
         old_tariff_revenue = (final_res_x * retail_tariff_value / 2)
         old_tariff_revenue.columns = final_res_x.columns.astype(str)
@@ -875,8 +853,7 @@ class AnalysisService:
             columns=lambda x: x + '_old_tariff')
         cost_df = pd.concat(
             [cost_df, old_utility_cost, new_utility_cost, old_tariff_revenue], axis=1)
-        output_data['load_simulation_tod_calculation'] = cost_df.to_dict(
-            'records')
+        output_data['load_simulation_tod_calculation'] = cost_df.to_dict('records')
 
         def calculate_tod_surcharge(year_num):
             try:
@@ -898,15 +875,15 @@ class AnalysisService:
                 shared_saving = float(input_data['shared_saving']) / 100
                 if retail_tariff_df.iloc[0, 0] == 0:
                     raise ValueError("Retail tariff cannot be zero")
-                numerator = (60 / input_data['resolution'] * (
-                    old_tariff_sum + cost_diff) * shared_saving) / retail_tariff_df.iloc[0, 0]
+                numerator = (60 / input_data['resolution'] * (old_tariff_sum +
+                            cost_diff) * shared_saving) / retail_tariff_df.iloc[0, 0]
                 denominator = (s_pk_sum + w_pk_sum - s_op_sum - w_op_sum)
                 if denominator == 0:
                     logger.warning(
                         f"Zero denominator in calculate_tod_surcharge for year {year_num}, returning 0")
                     return 0
                 result = 100 * (numerator - (s_pk_sum + w_pk_sum +
-                                             s_op_sum + w_op_sum + s_0_sum + w_0_sum)) / denominator
+                                s_op_sum + w_op_sum + s_0_sum + w_0_sum)) / denominator
                 return round(result, 2)
             except Exception as e:
                 logger.error(
