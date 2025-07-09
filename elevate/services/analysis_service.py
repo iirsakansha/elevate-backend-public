@@ -453,7 +453,7 @@ class AnalysisService:
                     veh_all_comb, nan=0.0, posinf=0.0, neginf=0.0)
 
                 charging_duration = ((60*cost_per_unit/input_data['resolution']) /
-                                     (penetration_rate*energy_consumption/100)) * (ending_soc_matrix - starting_soc_matrix)
+                                     (penetration_rate*energy_consumption)) * (ending_soc_matrix - starting_soc_matrix)
                 charging_duration = np.nan_to_num(
                     charging_duration, nan=0.0, posinf=0.0, neginf=0.0)
                 charging_duration_p = np.where(
