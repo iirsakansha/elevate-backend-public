@@ -10,7 +10,7 @@ urlpatterns = [
     path('api/login/', views.LoginAPI.as_view(), name='login'),
     path('api/logout/', knox_views.LogoutView.as_view(), name='logout'),
     path('api/change-password/', views.ChangePasswordView.as_view(),
-         name='change-0password'),
+         name='change-password'),
     path('api/invite-user/', views.InviteUserAPI.as_view(), name='invite-user'),
     path('api/user-profile/', views.InvitedUserProfileAPI.as_view(),
          name='user-profile'),
