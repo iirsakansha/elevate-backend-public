@@ -124,13 +124,13 @@ WSGI_APPLICATION = 'Main_project.wsgi.application'
 # Database
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
-        'OPTIONS': {
-            'timeout': 20,
-            'isolation_level': None,
-        },
-    },
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': env('DB_NAME', default='Elevate'),
+        'USER': env('DB_USER', default='postgres'),
+        'PASSWORD': env('DB_PASSWORD', default='Admin@123'),
+        'HOST': env('DB_HOST', default='localhost'),
+        'PORT': env('DB_PORT', default='5432'),
+    }
 }
 
 # Password validation
