@@ -87,12 +87,10 @@
   <div class="email-container">
     <div class="header">
       <img src="https://byniel.com/wp-content/uploads/2025/06/nav_logo_color_0.png" alt="ELEVATE Logo">
-      <h2>You're Invited to <span class="highlight">ELEVATE</span></h2>
+      <h2>You have been registered to the<span class="highlight">ELEVATE</span> platform.</h2>
     </div>
 
     <p>Hi <strong>{{ username }}</strong>,</p>
-
-    <p>You’ve been invited to join the <strong>ELEVATE</strong> platform!</p>
 
     <p>Here are your login credentials:</p>
 
@@ -101,10 +99,8 @@
       <li><strong>Password:</strong> {{ random_password }}</li>
     </ul>
 
-    <p>Click the button below to activate your account and set your new password:</p>
-
     <p style="text-align: center;">
-      <a href="{{ activation_link }}" class="btn">Access ELEVATE</a>
+      <a href="{{ signin_url }}" class="btn">Access ELEVATE</a>
     </p>
 
     <p>If you did not expect this email, feel free to ignore it.</p>

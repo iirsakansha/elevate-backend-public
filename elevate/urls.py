@@ -6,6 +6,7 @@ app_name = 'elevate'
 
 urlpatterns = [
     path('', views.index, name='index'),
+    path('api/register/', views.RegisterAPI.as_view(), name='register'),
     path('api/get-csrf-token/', views.get_csrf_token, name='get-csrf-token'),
     path('api/login/', views.LoginAPI.as_view(), name='login'),
     path('api/logout/', knox_views.LogoutView.as_view(), name='logout'),

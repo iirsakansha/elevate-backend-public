@@ -61,6 +61,10 @@ class UserProfile(TimeStampedModel):
         default="user",
         verbose_name="role",
     )
+    is_self_registered = models.BooleanField(
+        default=False,
+        verbose_name="is self registered",
+    )
 
     class Meta:
         verbose_name = "user profile"
