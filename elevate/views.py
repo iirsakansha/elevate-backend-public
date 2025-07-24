@@ -11,6 +11,7 @@ from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.conf import settings
+from django.db.models import Q
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -23,7 +24,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.core.files.storage import FileSystemStorage
 from .models import PermanentAnalysis, UserProfile, Analysis, LoadCategoryModel, VehicleCategoryModel, Files, UserAnalysis
 from .serializers import (
-    PermanentAnalysisSerializer, RegisterSerializer, LoginUserSerializer,
+    PermanentAnalysisSerializer, LoginUserSerializer,
     ChangePasswordSerializer, SetPasswordSerializer, PasswordResetSerializer,
     PasswordResetNoEmailSerializer, InvitedUserProfileSerializer, UserSerializer,
     AnalysisSerializer, LoadCategoryModelSerializer, VehicleCategoryModelSerializer,
@@ -57,6 +58,66 @@ def get_csrf_token(request):
 def index(request):
     """Render the index page."""
     return render(request, 'elevate/index.html', {})
+
+
+class RegisterAPI(APIView):
+    permission_classes = [AllowAny]
+    """API for registering new users directly (not invited)."""
+
+    def post(self, request):
+        email = request.data.get('email', '').lower().strip()
+        if not email:
+            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if User.objects.filter(email=email).exists():
+            return Response({"error": "User with this email already exists"}, status=status.HTTP_400_BAD_REQUEST)
+
+        random_password = get_random_string(length=12)
+        username = email.split(
+            '@')[0] + get_random_string(4).lower()  # ensure uniqueness
+
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=random_password,
+                    is_staff=False
+                )
+                UserProfile.objects.create(
+                    user=user,
+                    organization="World Resources Institute",
+                    invitation_status="Completed",
+                    invitation_username=username,
+                    temporary_password=random_password,
+                    role="user",
+                    is_self_registered=True,
+                )
+
+                context = {
+                    'username': username,
+                    'random_password': random_password,
+                    'current_year': datetime.now().year,
+                    'signin_url': f"{settings.FRONTEND_URL}/signin"
+                }
+
+                html_message = render_to_string(
+                    'emails/self-register.html', context)
+                email_msg = EmailMessage(
+                    subject='Your Elevate Account Credentials',
+                    body=html_message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    to=[email],
+                )
+                email_msg.content_subtype = "html"
+                email_msg.send()
+
+            return Response({"message": "Registration successful. Credentials sent to email."}, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Registration email sending failed: {str(e)}")
+            return Response({"error": "Failed to register", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class LoginAPI(generics.GenericAPIView):
     """API for user login."""
@@ -93,6 +154,10 @@ class ChangePasswordView(generics.UpdateAPIView):
     """API to change user password."""
     serializer_class = ChangePasswordSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if request.user.profile.is_self_registered:
+            return Response({"error": "You are not allowed to change password."}, status=403)
 
     def get_object(self):
         return self.request.user
@@ -327,7 +392,8 @@ class ListInvitedUsersAPI(generics.ListAPIView):
 
     def get_queryset(self):
         return User.objects.filter(
-            profile__invitation_status__in=['Pending', 'Accepted']
+            Q(profile__invitation_status__in=['Pending', 'Accepted']) |
+            Q(profile__is_self_registered=True)
         )
 
     def list(self, request, *args, **kwargs):

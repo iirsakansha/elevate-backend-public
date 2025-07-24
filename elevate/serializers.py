@@ -9,24 +9,6 @@ from .models import (
 from datetime import datetime
 
 
-class RegisterSerializer(serializers.ModelSerializer):
-    """Serializer for user registration."""
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'password']
-        extra_kwargs = {'password': {'write_only': True}}
-
-    def create(self, validated_data):
-        """Create a new user and associated profile."""
-        user = User.objects.create_user(
-            validated_data['username'],
-            validated_data['email'],
-            validated_data['password']
-        )
-        UserProfile.objects.create(user=user)
-        return user
-
-
 class LoginUserSerializer(serializers.Serializer):
     """Serializer for user login."""
     username = serializers.CharField()
@@ -72,11 +54,13 @@ class InvitedUserProfileSerializer(serializers.ModelSerializer):
         source='profile.invitation_status', default='Pending')
     created_at = serializers.DateTimeField(
         source='profile.created_at', read_only=True)
+    is_self_registered = serializers.BooleanField(
+        source='profile.is_self_registered', default=False)
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email',
-                  'organization', 'status', 'created_at']
+                  'organization', 'status', 'created_at', 'is_self_registered']
 
     def validate(self, data):
         """Validate that the user account is active."""
@@ -443,6 +427,7 @@ class AnalysisSerializer(serializers.ModelSerializer):
 
         return data
 
+
 class FilesSerializer(serializers.ModelSerializer):
     """Serializer for Files."""
     class Meta:
@@ -460,7 +445,7 @@ class FilesSerializer(serializers.ModelSerializer):
         """Create a new Files instance with the authenticated user."""
         validated_data['user'] = self.context['request'].user
         return super().create(validated_data)
-    
+
 
 class UserAnalysisSerializer(serializers.ModelSerializer):
     """Serializer for UserAnalysis."""
