@@ -1,0 +1,85 @@
+name: Elevate Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: Elevate
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: admin123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      # Django settings
+      DEBUG: true
+      SECRET_KEY: test-secret-key
+
+      # Database
+      DB_NAME: Elevate
+      DB_USER: postgres
+      DB_PASSWORD: admin123
+      DB_HOST: localhost
+      DB_PORT: 5432
+
+      # Hosts
+      ALLOWED_HOSTS: 127.0.0.1,localhost
+
+      # CORS / CSRF
+      CORS_ORIGIN_ALLOW_ALL: false
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      CSRF_TRUSTED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+
+      # Email (dummy values)
+      EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+      EMAIL_HOST: smtp.gmail.com
+      EMAIL_PORT: 587
+      EMAIL_USE_TLS: true
+      EMAIL_HOST_USER: noreply@example.com
+      EMAIL_HOST_PASSWORD: dummy-password
+      DEFAULT_FROM_EMAIL: noreply@example.com
+      FRONTEND_URL: http://localhost:5173
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for DB to be ready
+        run: |
+          until pg_isready -h localhost -p 5432; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Run migrations
+        run: python manage.py migrate
+
+      - name: Run tests
+        run: |
+          coverage run manage.py test
+          coverage report

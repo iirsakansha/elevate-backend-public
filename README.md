@@ -30,6 +30,11 @@ pip install altair
 pip install scipy
 pip install xlrd>=2.0.1
 pip install openpyxl
+pip install django-environ
+pip install psycopg2-binary
+pip install black isort flake8 pre-commit
+pip install psycopg2-binary
+pip install numpy pandas
 
 These packages are used for admin UI, APIs, CORS handling, authentication, and data visualization.
 
@@ -58,5 +63,4 @@ python manage.py runserver
 backend :http://127.0.0.1:8000/
 Admin Panel : http://127.0.0.1:8000/superadmin/
 
-pip install django-environ
-pip install psycopg2-binary
+
