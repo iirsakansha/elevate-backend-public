@@ -20,21 +20,15 @@ After activation, your terminal will be prefixed with (env), indicating you're i
  From requirements.txt
 
 pip install -r requirements.txt
-pip install django
-pip install django-admin-interface
-pip install djangorestframework
-pip install django-cors-headers
-pip install django-rest-knox
-pip install seaborn
-pip install altair
-pip install scipy
-pip install xlrd>=2.0.1
-pip install openpyxl
-pip install django-environ
-pip install psycopg2-binary
+pip install -r requirements-dev.txt
+
+Otherwise, manually install the packages:
+
+pip install django djangorestframework django-rest-knox \
+django-cors-headers django-admin-interface django-environ \
+altair seaborn scipy numpy pandas matplotlib openpyxl xlrd>=2.0.1 \
+psycopg2-binary
 pip install black isort flake8 pre-commit
-pip install psycopg2-binary
-pip install numpy pandas
 
 These packages are used for admin UI, APIs, CORS handling, authentication, and data visualization.
 
