@@ -1,8 +1,14 @@
 import os
 
-from .base import *  # noqa: F403, F401
+from dotenv import load_dotenv
 
-# Helper functions to replace decouple functionality
+from .base import *
+
+env_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"
+)
+
+load_dotenv(env_path)
 
 
 def get_bool_env(key, default=False):
@@ -40,14 +46,17 @@ CSRF_TRUSTED_ORIGINS = get_csv_env(
     "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 )
 
+# EMAIL CONFIGURATION
 EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
 )
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = get_int_env("EMAIL_PORT", 587)
 EMAIL_USE_TLS = get_bool_env("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = get_bool_env("EMAIL_USE_SSL", False)
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@example.com")
+EMAIL_TIMEOUT = get_int_env("EMAIL_TIMEOUT", 60)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
