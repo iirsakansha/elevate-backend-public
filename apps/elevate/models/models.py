@@ -1,14 +1,20 @@
-from django.db import models
 from django.contrib.auth.models import User
-from django.utils import timezone
-from django.core.validators import MinValueValidator, MaxValueValidator
-from elevate.constants import PERCENTAGE_VALIDATOR, CATEGORY_CHOICES, VEHICLE_CATEGORY_CHOICES
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+
+from apps.elevate.constants import (
+    CATEGORY_CHOICES,
+    PERCENTAGE_VALIDATOR,
+    VEHICLE_CATEGORY_CHOICES,
+)
+
 # Abstract base class for timestamped models
 
 
 class TimeStampedModel(models.Model):
     """Abstract base class for models with created_at and updated_at fields."""
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -18,6 +24,7 @@ class TimeStampedModel(models.Model):
 
 class UserProfile(TimeStampedModel):
     """User profile model extending Django's User model."""
+
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -76,6 +83,7 @@ class UserProfile(TimeStampedModel):
 
 class LoadCategoryModel(models.Model):
     """Model for categorizing load types."""
+
     category = models.CharField(
         max_length=20,
         choices=CATEGORY_CHOICES,
@@ -112,6 +120,7 @@ class LoadCategoryModel(models.Model):
 
 class VehicleCategoryModel(models.Model):
     """Model for categorizing vehicle types."""
+
     vehicle_category = models.CharField(
         max_length=20,
         choices=VEHICLE_CATEGORY_CHOICES,
@@ -217,6 +226,7 @@ class VehicleCategoryModel(models.Model):
 
 class BaseAnalysisModel(TimeStampedModel):
     """Abstract base class for analysis models."""
+
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -463,11 +473,12 @@ class BaseAnalysisModel(TimeStampedModel):
 
 class Analysis(BaseAnalysisModel):
     """Model for user-specific analyses."""
+
     file_id = models.PositiveIntegerField(
         default=0,
         verbose_name="file ID",
     )
-    is_load_split_file = models.CharField( 
+    is_load_split_file = models.CharField(
         max_length=400,
         default="",
         blank=True,
@@ -485,6 +496,7 @@ class Analysis(BaseAnalysisModel):
 
 class PermanentAnalysis(BaseAnalysisModel):
     """Model for permanent analyses with nullable user."""
+
     user = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -504,6 +516,7 @@ class PermanentAnalysis(BaseAnalysisModel):
 
 class Files(models.Model):
     """Model for storing uploaded files."""
+
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -534,14 +547,17 @@ class Files(models.Model):
         except Exception as e:
             # Log the error (assuming a logging setup)
             import logging
+
             logger = logging.getLogger(__name__)
             logger.error(f"Error deleting file {self.file.name}: {str(e)}")
 
     def __str__(self):
         return f"File {self.id} uploaded by {self.user.username}"
 
+
 class UserAnalysis(models.Model):
     """Model for logging user analysis activities."""
+
     user_name = models.CharField(
         max_length=50,
         default="",

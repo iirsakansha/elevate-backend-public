@@ -1,5 +1,5 @@
 # myapp/constants.py
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 
 PERCENTAGE_VALIDATOR = [MinValueValidator(0), MaxValueValidator(100)]
 CATEGORY_CHOICES = (

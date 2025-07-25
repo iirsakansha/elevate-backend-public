@@ -82,3 +82,8 @@ webencodings==0.5.1
 widgetsnbextension==3.5.2
 xlrd==2.0.1
 XlsxWriter==3.0.2
+# requirements-dev.txt
+black==24.3.0
+isort==5.12.0
+flake8==6.1.0
+pre-commit==3.5.0
