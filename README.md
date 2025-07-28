@@ -29,6 +29,7 @@ django-cors-headers django-admin-interface django-environ \
 altair seaborn scipy numpy pandas matplotlib openpyxl xlrd>=2.0.1 \
 psycopg2-binary
 pip install black isort flake8 pre-commit
+pip install python-dotenv
 
 These packages are used for admin UI, APIs, CORS handling, authentication, and data visualization.
 
