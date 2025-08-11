@@ -3,26 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual Environments
-.env
-.venv/
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Media and Static uploads
-media/
-staticfiles/
-
-# Pyre (type checker)
-.pyre/
-
-# Compiled C extensions
+# C extensions
 *.so
 
-# Packaging
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -43,18 +27,20 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Testing and coverage
+# Unit test / coverage reports
+htmlcov/
 .tox/
 .nox/
-.pytest_cache/
 .coverage
 .coverage.*
 .cache
@@ -62,60 +48,126 @@ nosetests.xml
 coverage.xml
 *.cover
 *.py,cover
-htmlcov/
 .hypothesis/
-
-# Django specific
-*.log
-local_settings.py
-
-# Editor configs and junk
-*.swp
-*.bak
-*.tmp
-*.DS_Store
-*.idea/
-*.vscode/
-*.sublime-project
-*.sublime-workspace
-
-# Jupyter / IPython
-.ipynb_checkpoints
-profile_default/
-ipython_config.py
+.pytest_cache/
 
 # Translations
 *.mo
 *.pot
 
-# Pyenv
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
 .python-version
 
-# Pipenv / Poetry
-# Pipfile.lock  # Uncomment if you want to ignore it
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
 __pypackages__/
 
-# Celery
+# Celery stuff
 celerybeat-schedule
 celerybeat.pid
 
-# Scrapy
-.scrapy/
+# SageMath parsed files
+*.sage.py
 
-# MkDocs
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment files (IMPORTANT: Never commit actual environment files)
+.env.*
+!.env.template
+!.env.example
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
 /site
 
-# Mypy
+# mypy
 .mypy_cache/
 .dmypy.json
 dmypy.json
 
-# Sphinx
-docs/_build/
+# Pyre type checker
+.pyre/
 
-# Spyder
-.spyderproject
-.spyproject
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Rope
-.ropeproject
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Media files (uploads)
+media/
+
+# Static files (collected)
+staticfiles/
+static/
+
+# Database
+*.sqlite3
+*.db
+
+# Logs
+logs/
+*.log
+
+# Backup files
+*.bak
+*.backup
+
+# Temporary files
+*.tmp
+*.temp
