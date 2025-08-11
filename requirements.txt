@@ -1,5 +1,5 @@
 # Core Django & Admin UI
-Django==3.0
+Django==4.2.14
 django-admin-interface==0.18.4
 django-colorfield==0.6.3
 django-flat-responsive==2.0
@@ -13,8 +13,8 @@ django-rest-knox==4.1.0
 
 # Data Handling & Visualization
 numpy==1.26.4
-pandas==1.3.4
-scipy==1.7.2
+pandas==2.2.2
+scipy==1.13.1
 seaborn==0.11.2
 altair==4.1.0
 matplotlib==3.4.3
