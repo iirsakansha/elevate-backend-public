@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Welcome to ELEVATE</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f9f9f9;
+      margin: 0;
+      padding: 0;
+      color: #333333;
+    }
+    .email-container {
+      max-width: 600px;
+      margin: 40px auto;
+      background: #ffffff;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+      border: 1px solid #eee;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .header img {
+      width: 160px;
+      height: auto;
+      margin-bottom: 10px;
+    }
+    .header h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+      color: #222;
+    }
+    .highlight {
+      color: #f3b229;
+      font-weight: bold;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    ul {
+      padding-left: 20px;
+      margin: 10px 0 20px;
+    }
+    ul li {
+      font-size: 16px;
+      margin-bottom: 6px;
+    }
+    .btn {
+      display: inline-block;
+      margin: 25px auto;
+      padding:10px 20px;
+      background-color: #f3b229;
+      color:rgb(0, 0, 0) !important;
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 16px;
+      box-shadow: 0 4px 10px rgba(243, 178, 41, 0.3);
+      transition: background 0.3s ease;
+    }
+    .btn:hover {
+      background-color: #ffdc92;
+    }
+    .footer {
+      margin-top: 40px;
+      font-size: 13px;
+      color: #999999;
+      text-align: center;
+    }
+    @media (max-width: 600px) {
+      .email-container {
+        padding: 20px;
+      }
+      .btn {
+        width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="header">
+      <img src="https://byniel.com/wp-content/uploads/2025/07/WRI_India_logo_4c.png" alt="ELEVATE Logo">
+      <h2>You have been registered to the <span class="highlight">ELEVATE</span> platform.</h2>
+    </div>
+
+    <p>Hi <strong>{{ username }}</strong>,</p>
+
+    <p>Here are your login credentials:</p>
+
+    <ul>
+      <li><strong>Username:</strong> {{ username }}</li>
+      <li><strong>Password:</strong> {{ random_password }}</li>
+    </ul>
+
+    <p style="text-align: center;">
+      <a href="{{ signin_url }}" class="btn">Access ELEVATE</a>
+    </p>
+
+    <p>If you did not expect this email, feel free to ignore it.</p>
+
+    <div class="footer">
+      &copy; {{ current_year }} ELEVATE. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>
