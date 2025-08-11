@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 88
+target-version = ['py39']
+exclude = '''
+/(
+    env
+  | \.env
+  | \.git
+  | __pycache__
+  | migrations
+  | site-packages
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["apps"]
