@@ -81,5 +81,5 @@ jobs:
 
       - name: Run tests
         run: |
-          coverage run manage.py test
-          coverage report
+          coverage run manage.py test apps.elevate.tests
+          coverage xml

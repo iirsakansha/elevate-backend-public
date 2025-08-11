@@ -1,5 +1,6 @@
-# apps/elevate/tests/test_sample.py
+from django.test import TestCase
 
 
-def test_sample_math():
-    assert 2 + 2 == 4
+class SampleTest(TestCase):
+    def test_addition(self):
+        self.assertEqual(1 + 1, 2)
