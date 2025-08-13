@@ -78,16 +78,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "Elevate"),
-        "USER": os.environ.get("DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", "admin123"),
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-    }
-}
+# DATABASE CONFIGURATION REMOVED - Will be defined in dev.py/prod.py
+# This ensures each environment has complete control over database settings
 
 AUTH_PASSWORD_VALIDATORS = [
     {
