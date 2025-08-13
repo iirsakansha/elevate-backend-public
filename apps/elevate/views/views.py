@@ -62,7 +62,7 @@ def get_csrf_token(request):
 
 def index(request):
     """Render the index page."""
-    return render(request, "templates/elevate/index.html", {})
+    return render(request, "elevate/index.html", {})
 
 
 class RegisterAPI(APIView):
