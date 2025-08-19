@@ -5,7 +5,23 @@ import sys
 
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+    # Check if we're in production environment
+    # Priority: Environment variable > .env file > default to dev
+
+    # First check if DJANGO_SETTINGS_MODULE is already set
+    if not os.environ.get("DJANGO_SETTINGS_MODULE"):
+        # Try to load from .env file
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv()
+        except ImportError:
+            pass
+
+    # Set default based on environment or fall back to dev
+    default_settings = os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", default_settings)
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
