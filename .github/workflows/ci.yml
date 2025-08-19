@@ -50,9 +50,9 @@ jobs:
       EMAIL_HOST: smtp.gmail.com
       EMAIL_PORT: 587
       EMAIL_USE_TLS: true
-      EMAIL_HOST_USER: neelam@byniel.comm
-      EMAIL_HOST_PASSWORD: duknfkdofwuobztp
-      DEFAULT_FROM_EMAIL: neelam@byniel.com
+      EMAIL_HOST_USER: elevate.ev.tool@gmail.com
+      EMAIL_HOST_PASSWORD: fxnhzybjxabmziel
+      DEFAULT_FROM_EMAIL: elevate.ev.tool@gmail.com
       FRONTEND_URL: http://localhost:5173
 
     steps:
