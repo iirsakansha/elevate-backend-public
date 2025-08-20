@@ -475,27 +475,27 @@ class AnalysisService:
             )
             transformer_capacity_kva = max(float(transformer_capacity_kva), 100)
 
-            # Calculate safety planning trigger (typically 80% of capacity)
+            # Calculate safety planning trigger
             safety_planning_percentage = float(input_data.get("br_f", 80)) / 100
             safety_planning_trigger = (
                 transformer_capacity_kva * safety_planning_percentage
             )
 
-            # Calculate rated capacity trigger (typically 90% of capacity)
-            rated_capacity_trigger = transformer_capacity_kva * 0.9
+            # CORRECTED: Rated capacity trigger is 100% of transformer capacity
+            rated_capacity_trigger = transformer_capacity_kva * 1.0
 
             return {
                 "full_transformer_capacity": transformer_capacity_kva,
                 "safety_planning_trigger": safety_planning_trigger,
-                "rated_capacity_trigger": rated_capacity_trigger,
+                "rated_capacity_trigger": rated_capacity_trigger,  # This should be 630 kVA
                 "safety_planning_percentage": safety_planning_percentage * 100,
             }
         except Exception as e:
             logger.error(f"Error calculating transformer capacity lines: {str(e)}")
             return {
                 "full_transformer_capacity": 630,
-                "safety_planning_trigger": 800,
-                "rated_capacity_trigger": 900,
+                "safety_planning_trigger": 504,  # 80% of 630
+                "rated_capacity_trigger": 630,  # 100% of 630
                 "safety_planning_percentage": 80,
             }
 
@@ -721,7 +721,11 @@ class AnalysisService:
             "vyv",
             "vrv",
         ]
-        source_data = source_data.fillna(0).replace([np.inf, -np.inf], 0)
+        source_data = (
+            source_data.fillna(0)
+            .replace([np.inf, -np.inf], 0)
+            .infer_objects(copy=False)
+        )
 
         try:
             source_data["calculated_load"] = (
@@ -940,10 +944,40 @@ class AnalysisService:
                 }
             )
         output_data["yearly_capacity_lines"] = yearly_capacity_lines
-        required_net_loads = [
-            pd.DataFrame(selected_ranges[year]) + ev_load_sums[year].values
-            for year in range(5)
-        ]
+
+        # FIXED: Required net loads calculation with proper shape handling
+        required_net_loads = []
+        for year in range(5):
+            if year < len(selected_ranges) and year < len(ev_load_sums):
+                base_load_df = pd.DataFrame(selected_ranges[year])
+
+                # Get EV load as a 1D array (time blocks)
+                ev_load_daily = ev_load_sums[year].values.flatten()  # Shape: (48,)
+
+                # Check shapes for debugging
+                logger.info(
+                    f"Year {year+1}: Base load shape: {base_load_df.shape}, EV load shape: {ev_load_daily.shape}"
+                )
+
+                # Create EV load DataFrame with same shape as base load
+                # Broadcast EV daily pattern across all days
+                num_time_blocks, num_days = base_load_df.shape
+                ev_load_matrix = np.tile(ev_load_daily.reshape(-1, 1), (1, num_days))
+                ev_load_df = pd.DataFrame(
+                    ev_load_matrix,
+                    index=base_load_df.index,
+                    columns=base_load_df.columns,
+                )
+
+                # Now both DataFrames have compatible shapes
+                net_load = base_load_df + ev_load_df
+                required_net_loads.append(net_load)
+
+                logger.info(f"Year {year+1}: Net load shape: {net_load.shape}")
+            else:
+                # Create empty DataFrame for missing years
+                required_net_loads.append(pd.DataFrame())
+
         combined_loads = []
 
         for year in range(5):
@@ -982,39 +1016,34 @@ class AnalysisService:
         overshots_rated = [
             rn - (excel_data.iloc[0, 1] * (90 / 100)) for rn in required_net_loads
         ]
+
         table_data = []
         capacity_lines = self._calculate_transformer_capacity_lines(
             excel_data, input_data
         )
+
         for year in range(5):
             if year < len(required_net_loads) and not required_net_loads[year].empty:
-                # Calculate excursions against safety planning trigger
-                planning_overshots = (
-                    required_net_loads[year] - capacity_lines["safety_planning_trigger"]
-                )
-                max_planning_excursion = (
-                    planning_overshots.max().max()
-                    if not planning_overshots.empty
-                    else 0
-                )
-                num_planning_excursions = (
-                    (planning_overshots > 0).values.sum()
-                    if not planning_overshots.empty
-                    else 0
-                )
+                # Convert to numpy array for proper calculation
+                net_load_values = required_net_loads[year].values
 
-                # Calculate excursions against rated capacity
-                rated_overshots = (
-                    required_net_loads[year] - capacity_lines["rated_capacity_trigger"]
+                # Calculate excursions against safety planning trigger
+                safety_trigger = capacity_lines["safety_planning_trigger"]
+                planning_excursions = net_load_values > safety_trigger
+                max_planning_excursion = max(
+                    float(net_load_values.max() - safety_trigger), 0.0
                 )
-                max_rated_excursion = (
-                    rated_overshots.max().max() if not rated_overshots.empty else 0
+                num_planning_excursions = int(np.sum(planning_excursions))
+
+                rated_trigger = capacity_lines["rated_capacity_trigger"]
+                rated_excursions = net_load_values > rated_trigger
+                max_rated_excursion = max(
+                    float(net_load_values.max() - rated_trigger), 0.0
                 )
-                num_rated_excursions = (
-                    (rated_overshots > 0).values.sum()
-                    if not rated_overshots.empty
-                    else 0
-                )
+                num_rated_excursions = int(np.sum(rated_excursions))
+
+                # Peak load calculation
+                peak_load_kva = float(net_load_values.max())
 
                 table_data.append(
                     {
@@ -1022,24 +1051,17 @@ class AnalysisService:
                         "transformer_capacity_kva": capacity_lines[
                             "full_transformer_capacity"
                         ],
-                        "safety_planning_trigger_kva": capacity_lines[
-                            "safety_planning_trigger"
-                        ],
-                        "rated_capacity_trigger_kva": capacity_lines[
-                            "rated_capacity_trigger"
-                        ],
+                        "safety_planning_trigger_kva": safety_trigger,
+                        "rated_capacity_trigger_kva": rated_trigger,
                         "max_excursion_planning": round(max_planning_excursion, 2),
                         "num_excursions_planning": num_planning_excursions,
                         "max_excursion_rated": round(max_rated_excursion, 2),
                         "num_excursions_rated": num_rated_excursions,
-                        "peak_load_kva": (
-                            round(required_net_loads[year].max().max(), 2)
-                            if not required_net_loads[year].empty
-                            else 0
-                        ),
+                        "peak_load_kva": round(peak_load_kva, 2),
                     }
                 )
             else:
+                # Fallback for empty data
                 table_data.append(
                     {
                         "year": f"year_{year+1}",
