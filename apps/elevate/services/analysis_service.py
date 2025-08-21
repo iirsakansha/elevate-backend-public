@@ -29,6 +29,9 @@ from ..serializers.serializers import (
     VehicleCategoryModelSerializer,
 )
 
+pd.set_option("future.no_silent_downcasting", True)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -320,7 +323,7 @@ class AnalysisService:
                         else:
                             logger.warning(f"File not found in filesystem: {file_path}")
                     else:
-                        logger.info(
+                        print(
                             f"Skipping file deletion for {load_split_file_url} as is_load_split is 'yes'"
                         )
                 else:
@@ -500,7 +503,7 @@ class AnalysisService:
             }
 
     def _run_full_analysis(self, input_data, folder_id):
-        """Run the full EV load forecasting analysis."""
+        """Run the full EV load forecasting analysis - FILE UPLOAD REQUIRED."""
 
         def load_forecast(
             vehicle_count,
@@ -633,6 +636,7 @@ class AnalysisService:
                 logger.error(f"Error in load_forecast calculation: {str(e)}")
                 return np.zeros((1, int(1440 / input_data["resolution"]))).tolist()
 
+        # Generate EV load data
         ev_load_data = []
         for vehicle in input_data["vehicle_category_data"]:
             try:
@@ -647,6 +651,7 @@ class AnalysisService:
         load_df = pd.DataFrame(np.concatenate(ev_load_data))
         load_df = load_df.fillna(0).replace([np.inf, -np.inf], 0)
 
+        # Process category splits
         category_split = {
             1: {"com": 0, "ind": 0, "res": 0, "pub": 0, "agr": 0, "other": 0},
             2: {"com": 0, "ind": 0, "res": 0, "pub": 0, "agr": 0, "other": 0},
@@ -660,53 +665,30 @@ class AnalysisService:
             )
             category_split[1][cat_key] = category["specify_split"]
             category_split[2][cat_key] = category["sales_cagr"]
-        if input_data["is_load_split_file"]:
-            try:
-                excel_data = pd.read_excel(
-                    input_data["is_load_split_file"], header=None
-                )
-                if excel_data.shape[0] < 5:
-                    raise InvalidFileError("Excel file must have at least 5 rows")
-                if excel_data.shape[1] != 11:
-                    raise InvalidFileError("Excel file must have exactly 11 columns")
-                excel_data = excel_data.fillna(0).replace([np.inf, -np.inf], 0)
-            except Exception as e:
-                logger.error(f"Failed to read Excel file: {str(e)}")
-                raise InvalidFileError(f"Failed to read Excel file: {str(e)}")
-        else:
-            logger.warning("No file provided, generating synthetic data")
-            time_blocks_per_day = int(1440 / input_data["resolution"])
-            num_days = 30
-            start_date = pd.Timestamp("2023-01-01")
-            datetime_range = pd.date_range(
-                start=start_date,
-                periods=num_days * time_blocks_per_day,
-                freq=f'{input_data["resolution"]}min',
-            )
-            base_load = 50 + 30 * np.sin(
-                2 * np.pi * np.arange(len(datetime_range)) / time_blocks_per_day
-            )
-            noise = np.random.normal(0, 5, len(datetime_range))
-            calculated_load = base_load + noise
-            calculated_load = np.maximum(calculated_load, 0)
-            excel_data = pd.DataFrame(
-                {
-                    "meter_no": range(len(datetime_range)),
-                    "datetime_utc": datetime_range,
-                    "active_b_ph": calculated_load * 0.33,
-                    "active_y_ph": calculated_load * 0.33,
-                    "active_r_ph": calculated_load * 0.34,
-                    "reactive_b_ph": calculated_load * 0.1,
-                    "reactive_y_ph": calculated_load * 0.1,
-                    "reactive_r_ph": calculated_load * 0.1,
-                    "vbv": np.full(len(datetime_range), 230),
-                    "vyv": np.full(len(datetime_range), 230),
-                    "vrv": np.full(len(datetime_range), 230),
-                }
-            )
-            excel_data = excel_data.reset_index(drop=True)
-            excel_data.iloc[0, 1] = 1000
 
+        # UPDATED: Mandatory file upload - no synthetic data generation
+        if not input_data["is_load_split_file"]:
+            raise InvalidFileError(
+                "File upload is required. Please provide an Excel file with load data."
+            )
+
+        try:
+            excel_data = pd.read_excel(input_data["is_load_split_file"], header=None)
+            if excel_data.shape[0] < 5:
+                raise InvalidFileError("Excel file must have at least 5 rows")
+            if excel_data.shape[1] != 11:
+                raise InvalidFileError("Excel file must have exactly 11 columns")
+            excel_data = excel_data.fillna(0).replace([np.inf, -np.inf], 0)
+            print(f"Successfully loaded Excel file with shape: {excel_data.shape}")
+        except Exception as e:
+            logger.error(f"Failed to read Excel file: {str(e)}")
+            raise InvalidFileError(f"Failed to read Excel file: {str(e)}")
+        print("=== EXCEL DATA VERIFICATION ===")
+        print(f"✅ Excel file loaded: {input_data['is_load_split_file']}")
+        print(f"✅ Excel shape: {excel_data.shape}")
+        print(f"✅ Transformer capacity from file: {excel_data.iloc[0, 1]}")
+
+        # Process source data from Excel file
         source_data = excel_data.iloc[4:, :].copy()
         source_data.columns = [
             "meter_no",
@@ -721,18 +703,18 @@ class AnalysisService:
             "vyv",
             "vrv",
         ]
-        source_data = (
-            source_data.fillna(0)
-            .replace([np.inf, -np.inf], 0)
-            .infer_objects(copy=False)
-        )
+        source_data = source_data.fillna(0).infer_objects(copy=False)
+        source_data = source_data.replace([np.inf, -np.inf], 0)
+        source_data = source_data.infer_objects(copy=False)
+
+        source_data = source_data.infer_objects(copy=False)
 
         try:
             source_data["calculated_load"] = (
-                (source_data["active_b_ph"] * source_data["vbv"])
-                + (source_data["active_y_ph"] * source_data["vyv"])
-                + (source_data["active_r_ph"] * source_data["vrv"])
-            ) / 1000
+                source_data["active_b_ph"]
+                + source_data["active_y_ph"]
+                + source_data["active_r_ph"]
+            )
             source_data["calculated_load"] = (
                 source_data["calculated_load"].fillna(0).replace([np.inf, -np.inf], 0)
             )
@@ -758,7 +740,11 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"Error processing source data: {str(e)}")
             raise AnalysisProcessingError(f"Error processing source data: {str(e)}")
-
+        print(
+            f"✅ First 5 calculated load values: {source_data['calculated_load'].head().tolist()}"
+        )
+        print("=== USING REAL DATA (NO SYNTHETIC) ===")
+        # Extract labels and transformer capacity
         labels = source_data["datetime_utc"].dt.date.unique()
         transformer_capacity_value = (
             excel_data.iloc[0, 1] if not pd.isna(excel_data.iloc[0, 1]) else 630
@@ -776,6 +762,7 @@ class AnalysisService:
             transformer_capacity_value, number_of_repeats
         )
 
+        # Process load data
         source_data.set_index("datetime_utc", inplace=True)
         calculated_load = source_data[["calculated_load"]].copy()
         calculated_load = calculated_load.fillna(0).replace([np.inf, -np.inf], 0)
@@ -822,19 +809,43 @@ class AnalysisService:
         final_load.columns = labels
         max_cols = min(406, final_load.shape[1])
         selected_range = final_load.iloc[:, :max_cols].copy()
-        selected_ranges = [selected_range]
+        # Ensure required categories exist in both specify_split and sales_cagr
+        required_categories = ["com", "ind", "res", "pub", "agr", "other"]
+        for cat in required_categories:
+            if cat not in category_split[1]:
+                category_split[1][cat] = 0
+                logger.warning(
+                    f"Missing category '{cat}' in specify_split, defaulting to 0"
+                )
+            if cat not in category_split[2]:
+                category_split[2][cat] = 0
+                logger.warning(
+                    f"Missing category '{cat}' in sales_cagr, defaulting to 0"
+                )
 
+        # Calculate year-wise growth safely
+        selected_ranges = [selected_range]
         for year in range(1, 5):
+            # Apply CAGR year-over-year
             growth_factors = {
-                cat: category_split[1][cat] * (1 + category_split[2][cat] / 100)
-                for cat in category_split[1]
+                cat: category_split[1][cat]
+                * ((1 + category_split[2][cat] / 100) ** year)
+                for cat in required_categories
             }
-            next_range = (selected_ranges[-1] / 100) * sum(growth_factors.values())
+            total_growth = sum(growth_factors.values())
+            if total_growth == 0:
+                logger.warning(f"Year {year}: Growth factors sum to 0, skipping")
+                next_range = selected_ranges[-1].copy() * 0
+            else:
+                next_range = (selected_ranges[0] / 100) * total_growth
             selected_ranges.append(next_range)
 
+        # Unpack for downstream usage
         selected_range_2, selected_range_3, selected_range_4, selected_range_5 = (
             selected_ranges[1:5]
         )
+
+        # Generate EV load for multiple years
         ev_load_sum = pd.DataFrame(load_df.sum(axis=0))
         growth_factors = [
             (input_data["vehicle_category_data"][i]["cagr_v"]) / 100 + 1
@@ -858,6 +869,7 @@ class AnalysisService:
             ev_load_sum_5,
         ]
 
+        # Prepare output data
         output_data = {}
         output_data["simulated_ev_load"] = load_df.values.tolist()
         load_df_years = [load_df]
@@ -874,6 +886,7 @@ class AnalysisService:
 
         output_data["ev_load"] = ev_loads
 
+        # Generate synthetic time series data for dt_base_load
         try:
             start_date = "2019-05-01"
             end_date = "2020-07-30"
@@ -907,6 +920,8 @@ class AnalysisService:
             pivot_df[date.date()] = np.round(daily_load.astype(float), 6)
 
         output_data["dt_base_load"] = pivot_df.values.tolist()
+
+        # Process base load for all years
         selected_ranges = [
             selected_range,
             selected_range_2,
@@ -917,21 +932,28 @@ class AnalysisService:
         base_loads = []
 
         for year in range(5):
-            if year >= len(selected_ranges):
-                continue
-            base_load = selected_ranges[year]
-            if base_load is None or base_load.empty:
-                continue
-            mean_load = base_load.mean(axis=1).values.tolist()
-            base_loads.append({f"year_{year+1}": mean_load})
+            if (
+                year < len(selected_ranges)
+                and selected_ranges[year] is not None
+                and not selected_ranges[year].empty
+            ):
+                mean_load = selected_ranges[year].mean(axis=1).values.tolist()
+                base_loads.append({f"year_{year+1}": mean_load})
+            else:
+                if base_loads:
+                    prev_load = base_loads[-1][f"year_{year}"]
+                    mean_load = [x * 1.02 for x in prev_load]
+                else:
+                    mean_load = [0] * int(1440 / input_data["resolution"])
+                base_loads.append({f"year_{year+1}": mean_load})
 
         output_data["base_load"] = base_loads
+
         capacity_lines = self._calculate_transformer_capacity_lines(
             excel_data, input_data
         )
         output_data["transformer_capacity_lines"] = capacity_lines
 
-        # Add capacity lines for each year with growth factors
         yearly_capacity_lines = []
         for year in range(1, 6):
             yearly_capacity_lines.append(
@@ -945,22 +967,12 @@ class AnalysisService:
             )
         output_data["yearly_capacity_lines"] = yearly_capacity_lines
 
-        # FIXED: Required net loads calculation with proper shape handling
         required_net_loads = []
         for year in range(5):
             if year < len(selected_ranges) and year < len(ev_load_sums):
                 base_load_df = pd.DataFrame(selected_ranges[year])
+                ev_load_daily = ev_load_sums[year].values.flatten()
 
-                # Get EV load as a 1D array (time blocks)
-                ev_load_daily = ev_load_sums[year].values.flatten()  # Shape: (48,)
-
-                # Check shapes for debugging
-                logger.info(
-                    f"Year {year+1}: Base load shape: {base_load_df.shape}, EV load shape: {ev_load_daily.shape}"
-                )
-
-                # Create EV load DataFrame with same shape as base load
-                # Broadcast EV daily pattern across all days
                 num_time_blocks, num_days = base_load_df.shape
                 ev_load_matrix = np.tile(ev_load_daily.reshape(-1, 1), (1, num_days))
                 ev_load_df = pd.DataFrame(
@@ -969,17 +981,13 @@ class AnalysisService:
                     columns=base_load_df.columns,
                 )
 
-                # Now both DataFrames have compatible shapes
                 net_load = base_load_df + ev_load_df
                 required_net_loads.append(net_load)
-
-                logger.info(f"Year {year+1}: Net load shape: {net_load.shape}")
+                print(f"Year {year+1}: Net load shape: {net_load.shape}")
             else:
-                # Create empty DataFrame for missing years
                 required_net_loads.append(pd.DataFrame())
 
         combined_loads = []
-
         for year in range(5):
             base_load = pd.DataFrame(selected_ranges[year]).mean(axis=1).values.tolist()
             ev_load = ev_load_sums[year].mean(axis=1).values.tolist()
@@ -988,12 +996,11 @@ class AnalysisService:
             )
 
         output_data["base_ev_load"] = combined_loads
-        final_res = pd.DataFrame(
-            np.random.rand(5, int(1440 / input_data["resolution"]))
-        )
+
         output_data["time_labels"] = self._generate_time_labels(
             input_data["resolution"]
         )
+
         if "tod" in input_data:
             formatted_tod = []
             for tod_item in input_data["tod"]:
@@ -1005,29 +1012,26 @@ class AnalysisService:
                         formatted_item[key] = value
                 formatted_tod.append(formatted_item)
             output_data["tod_formatted"] = formatted_tod
+
+        final_res = pd.DataFrame(
+            np.random.rand(5, int(1440 / input_data["resolution"]))
+        )
         output_data["base_tod_ev_load"] = self._generate_tod_ev_load_plot(
             final_res, excel_data, input_data["resolution"]
         )
 
-        overshots = [
-            rn - (excel_data.iloc[0, 1] * (float(input_data["br_f"]) / 100))
-            for rn in required_net_loads
-        ]
-        overshots_rated = [
-            rn - (excel_data.iloc[0, 1] * (90 / 100)) for rn in required_net_loads
-        ]
-
         table_data = []
-        capacity_lines = self._calculate_transformer_capacity_lines(
-            excel_data, input_data
-        )
-
         for year in range(5):
             if year < len(required_net_loads) and not required_net_loads[year].empty:
-                # Convert to numpy array for proper calculation
-                net_load_values = required_net_loads[year].values
+                net_load = required_net_loads[year]
+                net_load_values = net_load.values
 
-                # Calculate excursions against safety planning trigger
+                # Log array size and sample values
+                print(f"[Year {year+1}] net_load_values shape: {net_load_values.shape}")
+                print(
+                    f"[Year {year+1}] net_load_values sample (first row): {net_load_values[0][:10]}"
+                )
+
                 safety_trigger = capacity_lines["safety_planning_trigger"]
                 planning_excursions = net_load_values > safety_trigger
                 max_planning_excursion = max(
@@ -1042,8 +1046,19 @@ class AnalysisService:
                 )
                 num_rated_excursions = int(np.sum(rated_excursions))
 
-                # Peak load calculation
                 peak_load_kva = float(net_load_values.max())
+                print(f"[Year {year+1}] Peak load (from .max()): {peak_load_kva}")
+
+                # Get index of maximum
+                peak_idx = net_load.stack().idxmax()
+                peak_time_block = peak_idx[0]
+                peak_day = peak_idx[1]
+                peak_value = net_load.loc[peak_time_block, peak_day]
+
+                print(
+                    f"[Year {year+1}] Peak occurred at -> Day: {peak_day}, "
+                    f"Time Block: {peak_time_block}, Value: {peak_value}"
+                )
 
                 table_data.append(
                     {
@@ -1058,10 +1073,20 @@ class AnalysisService:
                         "max_excursion_rated": round(max_rated_excursion, 2),
                         "num_excursions_rated": num_rated_excursions,
                         "peak_load_kva": round(peak_load_kva, 2),
+                        "peak_day": str(peak_day),
+                        "peak_time_block": str(peak_time_block),
+                        "max_capacity_kva": capacity_lines["full_transformer_capacity"],
+                        "alarm_threshold_percent": round(
+                            (
+                                peak_load_kva
+                                / capacity_lines["full_transformer_capacity"]
+                            )
+                            * 100,
+                            2,
+                        ),
                     }
                 )
             else:
-                # Fallback for empty data
                 table_data.append(
                     {
                         "year": f"year_{year+1}",
@@ -1083,8 +1108,17 @@ class AnalysisService:
                 )
 
         output_data["summary_table"] = table_data
-        overshot_data = []
 
+        # Calculate overshot data
+        overshots = [
+            rn - (excel_data.iloc[0, 1] * (float(input_data["br_f"]) / 100))
+            for rn in required_net_loads
+        ]
+        overshots_rated = [
+            rn - (excel_data.iloc[0, 1] * (90 / 100)) for rn in required_net_loads
+        ]
+
+        overshot_data = []
         for year in range(1, 6):
             ov = overshots[year - 1]
             ov_r = overshots_rated[year - 1]
@@ -1120,6 +1154,7 @@ class AnalysisService:
             )
 
         output_data["overshot"] = overshot_data
+        # Calculate ToD costs and savings
         cost_df = pd.DataFrame(
             {
                 "seasons": np.random.choice(["summer", "winter"], 5),
@@ -1161,6 +1196,7 @@ class AnalysisService:
         cost_df = pd.concat(
             [cost_df, old_utility_cost, new_utility_cost, old_tariff_revenue], axis=1
         )
+
         output_data["load_simulation_tod_calculation"] = cost_df.to_dict("records")
 
         def calculate_tod_surcharge(year_num):
@@ -1234,6 +1270,7 @@ class AnalysisService:
         output_data["tod_surcharge_rebate"] = [
             calculate_tod_surcharge(i) for i in range(1, 5)
         ]
+
         return output_data
 
     def _validate_time_format(self, time_str):
