@@ -55,6 +55,7 @@ class UserProfile(TimeStampedModel):
         max_length=255,
         unique=True,
         blank=True,
+        null=True,
         verbose_name="invitation token",
     )
     password_reset_token = models.CharField(
