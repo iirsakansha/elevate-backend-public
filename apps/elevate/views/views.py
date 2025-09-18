@@ -67,10 +67,14 @@ def index(request):
 
 class RegisterAPI(APIView):
     permission_classes = [AllowAny]
-    """API for registering new users directly (not invited)."""
 
     def post(self, request):
         email = request.data.get("email", "").lower().strip()
+        name = request.data.get("name", "").strip()  # single field
+        designation = request.data.get("designation", "").strip()
+        organization = request.data.get("organization", "Not assigned").strip()
+        intended_use = request.data.get("intendedUse", "").strip()
+
         if not email:
             return Response(
                 {"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST
@@ -83,9 +87,11 @@ class RegisterAPI(APIView):
             )
 
         random_password = get_random_string(length=12)
-        username = (
-            email.split("@")[0] + get_random_string(4).lower()
-        )  # ensure uniqueness
+        username = email.split("@")[0] + get_random_string(4).lower()
+
+        # Store the single "name" as first_name (leave last_name empty)
+        first_name = name
+        last_name = ""
 
         try:
             with transaction.atomic():
@@ -94,10 +100,15 @@ class RegisterAPI(APIView):
                     email=email,
                     password=random_password,
                     is_staff=False,
+                    first_name=first_name,
+                    last_name=last_name,
                 )
+
                 UserProfile.objects.create(
                     user=user,
-                    organization="World Resources Institute",
+                    organization=organization,
+                    designation=designation,
+                    intended_use=intended_use,
                     invitation_status="Completed",
                     invitation_username=username,
                     temporary_password=random_password,
@@ -128,7 +139,7 @@ class RegisterAPI(APIView):
             )
 
         except Exception as e:
-            logger.error(f"Registration email sending failed: {str(e)}")
+            logger.error(f"Registration failed: {str(e)}")
             return Response(
                 {"error": "Failed to register", "details": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -285,6 +296,32 @@ class InvitedUserProfileAPI(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+    def update(self, request, *args, **kwargs):
+        user = self.get_object()
+        profile = user.profile
+
+        allowed_fields = {"organization", "intended_use", "designation"}
+        data = {
+            field: value
+            for field, value in request.data.items()
+            if field in allowed_fields
+        }
+
+        if not data:
+            return Response(
+                {
+                    "error": "No valid fields provided. You can only update organization, intended_use, or designation."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        for field, value in data.items():
+            setattr(profile, field, value)
+
+        profile.save()
+        serializer = self.get_serializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class SetPasswordAPI(generics.GenericAPIView):
