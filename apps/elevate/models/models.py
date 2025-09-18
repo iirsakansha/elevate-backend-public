@@ -36,6 +36,8 @@ class UserProfile(TimeStampedModel):
         default="Not assigned",
         verbose_name="organization",
     )
+    designation = models.CharField(max_length=255, blank=True, null=True)
+    intended_use = models.TextField(blank=True, null=True)
     invitation_status = models.CharField(
         max_length=50,
         default="Pending",
