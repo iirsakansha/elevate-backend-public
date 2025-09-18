@@ -57,14 +57,21 @@ class PasswordResetNoEmailSerializer(serializers.Serializer):
 
 
 class InvitedUserProfileSerializer(serializers.ModelSerializer):
-    """Serializer for invited user profile."""
+    name = serializers.CharField(source="first_name", required=False)
 
     organization = serializers.CharField(
         source="profile.organization", default="Not assigned"
     )
+    designation = serializers.CharField(
+        source="profile.designation", allow_blank=True, allow_null=True
+    )
+    intended_use = serializers.CharField(
+        source="profile.intended_use", allow_blank=True, allow_null=True
+    )
     status = serializers.CharField(
         source="profile.invitation_status", default="Pending"
     )
+    role = serializers.CharField(source="profile.role", default="user")
     created_at = serializers.DateTimeField(source="profile.created_at", read_only=True)
     is_self_registered = serializers.BooleanField(
         source="profile.is_self_registered", default=False
@@ -76,26 +83,38 @@ class InvitedUserProfileSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "name",
             "organization",
+            "designation",
+            "intended_use",
             "status",
+            "role",
             "created_at",
             "is_self_registered",
         ]
 
-    def validate(self, data):
-        """Validate that the user account is active."""
-        user = self.instance
-        if user and not user.is_active:
-            raise serializers.ValidationError("Account not activated")
-        return data
+    def update(self, instance, validated_data):
+        # handle name -> first_name
+        name = validated_data.pop("first_name", None)
+        if name is not None:
+            instance.first_name = name.strip()
+
+        # handle profile fields explicitly
+        profile_data = validated_data.pop("profile", {})
+        for field, value in profile_data.items():
+            setattr(instance.profile, field, value)
+
+        instance.profile.save()
+        instance.save()
+        return instance
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Serializer for user details."""
+    name = serializers.CharField(source="first_name", read_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "last_login", "first_name", "last_name", "username", "email"]
+        fields = ["id", "last_login", "username", "email", "name"]
 
 
 class LoadCategoryModelSerializer(serializers.ModelSerializer):
