@@ -684,9 +684,9 @@ class AnalysisService:
             logger.error(f"Failed to read Excel file: {str(e)}")
             raise InvalidFileError(f"Failed to read Excel file: {str(e)}")
         print("=== EXCEL DATA VERIFICATION ===")
-        print(f"✅ Excel file loaded: {input_data['is_load_split_file']}")
-        print(f"✅ Excel shape: {excel_data.shape}")
-        print(f"✅ Transformer capacity from file: {excel_data.iloc[0, 1]}")
+        print(f"Excel file loaded: {input_data['is_load_split_file']}")
+        print(f"Excel shape: {excel_data.shape}")
+        print(f"Transformer capacity from file: {excel_data.iloc[0, 1]}")
 
         # Process source data from Excel file
         source_data = excel_data.iloc[4:, :].copy()
@@ -741,7 +741,7 @@ class AnalysisService:
             logger.error(f"Error processing source data: {str(e)}")
             raise AnalysisProcessingError(f"Error processing source data: {str(e)}")
         print(
-            f"✅ First 5 calculated load values: {source_data['calculated_load'].head().tolist()}"
+            f"First 5 calculated load values: {source_data['calculated_load'].head().tolist()}"
         )
         print("=== USING REAL DATA (NO SYNTHETIC) ===")
         # Extract labels and transformer capacity
