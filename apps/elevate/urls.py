@@ -65,6 +65,11 @@ urlpatterns = [
         name="analysis-retrieve-update-destroy",
     ),
     path("api/ev-analysis/", views.AnalysisView.as_view(), name="ev-analysis"),
+    path(
+        "api/export-chart-image/",
+        views.ChartImageExportAPI.as_view(),
+        name="export-chart-image",
+    ),
     path("api/delete-data/", views.DeleteDataAPI.as_view(), name="delete-data"),
     path("api/file-upload/", views.FileUploadAPI.as_view(), name="file-upload"),
     path(

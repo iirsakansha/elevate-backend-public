@@ -3,6 +3,12 @@ import logging
 import os
 import shutil
 from datetime import datetime
+from io import BytesIO
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -741,3 +747,98 @@ class PermanentAnalysisRetrieveUpdateDestroyAPI(generics.RetrieveUpdateDestroyAP
     queryset = PermanentAnalysis.objects.all()
     serializer_class = PermanentAnalysisSerializer
     permission_classes = [permissions.AllowAny]
+
+
+class ChartImageExportAPI(APIView):
+    """API to render a chart server-side as a print-quality (300 DPI) PNG.
+
+    Browser canvas exports (Chart.js toBase64Image) carry no DPI metadata,
+    so pixel count alone doesn't guarantee external tools treat the image
+    as 300 DPI. matplotlib's savefig writes real DPI metadata, so this is
+    the only reliable way to produce a guaranteed 300 DPI export.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    CHART_WIDTH_INCHES = 10
+    CHART_HEIGHT_INCHES = 6
+    EXPORT_DPI = 300
+
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        labels = data.get("labels") or []
+        datasets = data.get("datasets") or []
+
+        if not labels or not datasets:
+            return Response(
+                {"error": "labels and datasets are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        chart_type = data.get("chart_type", "line")
+        title = data.get("title", "")
+        x_label = data.get("x_label", "")
+        y_label = data.get("y_label", "")
+        annotations = data.get("annotations") or []
+        filename = data.get("filename", "chart")
+
+        fig, ax = plt.subplots(figsize=(self.CHART_WIDTH_INCHES, self.CHART_HEIGHT_INCHES))
+        x_positions = range(len(labels))
+
+        if chart_type == "bar":
+            stack_totals = {}
+            for dataset in datasets:
+                stack_key = dataset.get("stack") or dataset.get("label")
+                values = dataset.get("data") or [0] * len(labels)
+                bottom = stack_totals.get(stack_key, [0] * len(labels))
+                ax.bar(
+                    x_positions,
+                    values,
+                    bottom=bottom,
+                    label=dataset.get("label", ""),
+                    color=dataset.get("color"),
+                )
+                stack_totals[stack_key] = [b + v for b, v in zip(bottom, values)]
+        else:
+            for dataset in datasets:
+                ax.plot(
+                    x_positions,
+                    dataset.get("data") or [],
+                    label=dataset.get("label", ""),
+                    color=dataset.get("color"),
+                    marker="o",
+                    markersize=2,
+                    linewidth=1.5,
+                )
+
+        for annotation in annotations:
+            value = annotation.get("value")
+            if value is None:
+                continue
+            ax.axhline(
+                y=value,
+                color=annotation.get("color", "#000000"),
+                linestyle="--",
+                linewidth=1.5,
+                label=annotation.get("label", ""),
+            )
+
+        tick_step = max(1, len(labels) // 12)
+        tick_positions = list(range(0, len(labels), tick_step))
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels([labels[i] for i in tick_positions], rotation=45, ha="right")
+
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.legend(fontsize=8, loc="best")
+        fig.tight_layout()
+
+        buffer = BytesIO()
+        fig.savefig(buffer, format="png", dpi=self.EXPORT_DPI)
+        plt.close(fig)
+        buffer.seek(0)
+
+        response = HttpResponse(buffer.getvalue(), content_type="image/png")
+        response["Content-Disposition"] = f'attachment; filename="{filename}.png"'
+        return response
