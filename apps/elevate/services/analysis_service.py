@@ -617,10 +617,15 @@ class AnalysisService:
                 output = np.sum(veh_all_comb, axis=1)
                 output = np.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0)
 
+                # `output` is the flattened (time_block x distance_bin) matrix,
+                # flattened row-major with (range_km + 1) distance bins per row.
+                # Recovering the original time block requires integer division
+                # by the row width, not modulo by the block count - modulo mixes
+                # in the distance bin and scrambles values across the wrong hours.
                 blo_sum_linear = np.zeros(int(1440 / input_data["resolution"]))
                 for i, value in enumerate(output):
                     if not np.isnan(value) and np.isfinite(value):
-                        block_idx = i % int(1440 / input_data["resolution"])
+                        block_idx = i // (range_km + 1)
                         blo_sum_linear[block_idx] += value
 
                 blo_load_sec = (penetration_rate * blo_sum_linear).reshape(
