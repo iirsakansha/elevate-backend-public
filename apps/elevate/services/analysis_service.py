@@ -1018,9 +1018,13 @@ class AnalysisService:
                 formatted_tod.append(formatted_item)
             output_data["tod_formatted"] = formatted_tod
 
-        final_res = pd.DataFrame(
-            np.random.rand(5, int(1440 / input_data["resolution"]))
+        # Real Year 1-5 EV load curves (one row per year, one column per time
+        # block) - was previously np.random.rand(...), which fed this chart
+        # with plain noise instead of the actual simulated load.
+        ev_load_matrix = np.array(
+            [list(year_entry.values())[0] for year_entry in ev_loads]
         )
+        final_res = pd.DataFrame(ev_load_matrix)
         output_data["base_tod_ev_load"] = self._generate_tod_ev_load_plot(
             final_res, excel_data, input_data["resolution"]
         )
@@ -1081,7 +1085,14 @@ class AnalysisService:
                         "peak_day": str(peak_day),
                         "peak_time_block": str(peak_time_block),
                         "max_capacity_kva": capacity_lines["full_transformer_capacity"],
-                        "alarm_threshold_percent": round(
+                        # Fixed device/policy setting (from the "% to raise alarm at"
+                        # input) - constant every year, does not depend on load.
+                        "alarm_threshold_percent": capacity_lines[
+                            "safety_planning_percentage"
+                        ],
+                        # How close the actual peak load came to full capacity that
+                        # year - genuinely varies year to year as load grows.
+                        "peak_load_percent_of_capacity": round(
                             (
                                 peak_load_kva
                                 / capacity_lines["full_transformer_capacity"]
@@ -1109,6 +1120,10 @@ class AnalysisService:
                         "max_excursion_rated": 0,
                         "num_excursions_rated": 0,
                         "peak_load_kva": 0,
+                        "alarm_threshold_percent": capacity_lines[
+                            "safety_planning_percentage"
+                        ],
+                        "peak_load_percent_of_capacity": 0,
                     }
                 )
 
